@@ -404,6 +404,10 @@ class MyPlugin(Star):
             json.dump(self.apply_data, f, ensure_ascii=False, indent=2)
 
     def _load_sign_data(self):
+        """加载签到数据。
+        当前格式: {date: {"signers": [qqid, ...], "backfill": [qqid, ...]}}
+        旧格式自动迁移。
+        """
         if os.path.exists(self.sign_file):
             with open(self.sign_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -415,19 +419,42 @@ class MyPlugin(Star):
                 migrated = {}
                 for qqid, date_str in data.items():
                     if date_str not in migrated:
-                        migrated[date_str] = []
-                    migrated[date_str].append(qqid)
+                        migrated[date_str] = {"signers": [], "backfill": []}
+                    migrated[date_str]["signers"].append(qqid)
                 return migrated
-            # 旧格式2: {date: {"signers": [...], "pool": int}}
-            if isinstance(sample, dict):
-                return {d: v.get("signers", []) for d, v in data.items()}
-            # 新格式: {date: [qqid, ...]}
-            return data
+            # 旧格式2: {date: [qqid, ...]}
+            if isinstance(sample, list):
+                return {d: {"signers": list(v), "backfill": []} for d, v in data.items()}
+            # 旧格式3: {date: {"signers": [...], "pool": int}} 或当前格式
+            migrated = {}
+            for d, v in data.items():
+                if isinstance(v, dict):
+                    migrated[d] = {
+                        "signers": list(v.get("signers", [])),
+                        "backfill": list(v.get("backfill", [])),
+                    }
+                else:
+                    migrated[d] = {"signers": [], "backfill": []}
+            return migrated
         return {}
 
     def _save_sign_data(self):
         with open(self.sign_file, "w", encoding="utf-8") as f:
             json.dump(self.sign_data, f, ensure_ascii=False, indent=2)
+
+    def _get_all_signed_qqids(self, date_str: str) -> list[str]:
+        """获取某天所有签到的 QQ（正常签到 + 补签）"""
+        entry = self.sign_data.get(date_str, {})
+        if isinstance(entry, dict):
+            return entry.get("signers", []) + entry.get("backfill", [])
+        return entry if isinstance(entry, list) else []
+
+    def _get_signers_only(self, date_str: str) -> list[str]:
+        """获取某天仅正常签到的 QQ（不含补签）"""
+        entry = self.sign_data.get(date_str, {})
+        if isinstance(entry, dict):
+            return entry.get("signers", [])
+        return entry if isinstance(entry, list) else []
 
     def _sign_consecutive_days(self, qqid: str) -> int:
         """计算当前连续签到天数（从今天往回数，含补签）"""
@@ -436,7 +463,7 @@ class MyPlugin(Star):
         d = today
         while True:
             ds = d.strftime("%Y-%m-%d")
-            if qqid in self.sign_data.get(ds, []):
+            if qqid in self._get_all_signed_qqids(ds):
                 streak += 1
                 d -= timedelta(days=1)
             else:
@@ -446,7 +473,7 @@ class MyPlugin(Star):
     def _sign_max_consecutive_days(self, qqid: str) -> int:
         """计算历史最高连续签到天数（遍历所有签到记录，含补签）"""
         signed = sorted(
-            ds for ds, signers in self.sign_data.items() if qqid in signers
+            ds for ds in self.sign_data if qqid in self._get_all_signed_qqids(ds)
         )
         if not signed:
             return 0
@@ -477,7 +504,7 @@ class MyPlugin(Star):
         signed_days = set()
         for d in range(1, total_days_in_month + 1):
             ds = f"{year}-{month:02d}-{d:02d}"
-            if qqid in self.sign_data.get(ds, []):
+            if qqid in self._get_all_signed_qqids(ds):
                 signed_days.add(d)
 
         # 字体
@@ -1243,24 +1270,29 @@ class MyPlugin(Star):
             return
         qqid = str(event.get_sender_id())
         bound = self.apply_data.get(qqid, [])
-        if not bound:
-            yield event.plain_result("你还没有绑定MC账号，请先使用 /wantwl <MC名> 绑定。")
-            return
+        mcname = bound[0] if bound else None
         today = time.strftime("%Y-%m-%d")
         yesterday = time.strftime("%Y-%m-%d", time.localtime(time.time() - 86400))
-        today_signers = self.sign_data.get(today, [])
-        if qqid in today_signers:
+        today_entry = self.sign_data.get(today, {"signers": [], "backfill": []})
+        if qqid in self._get_all_signed_qqids(today):
             yield event.plain_result("你今天已经签到过了，明天再来吧！")
             return
-        mcname = bound[0]
-        today_signers.append(qqid)
-        self.sign_data[today] = today_signers
+        # 记录签到
+        today_entry["signers"].append(qqid)
+        self.sign_data[today] = today_entry
         self._save_sign_data()
-        today_count = len(today_signers)
-        yesterday_signers = self.sign_data.get(yesterday, [])
-        yesterday_count = len(yesterday_signers)
+        today_count = len(today_entry["signers"]) + len(today_entry.get("backfill", []))
+        # 奖励仅基于昨日正常签到人数（不含补签）
+        yesterday_signers_only = self._get_signers_only(yesterday)
+        yesterday_count = len(yesterday_signers_only)
         streak = self._sign_consecutive_days(qqid)
         max_streak = self._sign_max_consecutive_days(qqid)
+        if not mcname:
+            yield event.plain_result(
+                f"签到成功！（未绑定MC账号，不发放铜钱）\n"
+                f"今日已签到 {today_count} 人  |  连续 {streak} 天  |  最高 {max_streak} 天"
+            )
+            return
         if yesterday_count > 0:
             pool = random.randint(self.sign_money_min, self.sign_money_max)
             reward = pool // yesterday_count
@@ -1302,9 +1334,16 @@ class MyPlugin(Star):
         else:
             removed = 0
             for date_str in self.sign_data:
-                signers = self.sign_data[date_str]
-                if target in signers:
-                    signers.remove(target)
+                entry = self.sign_data[date_str]
+                if isinstance(entry, dict):
+                    if target in entry.get("signers", []):
+                        entry["signers"].remove(target)
+                        removed += 1
+                    if target in entry.get("backfill", []):
+                        entry["backfill"].remove(target)
+                        removed += 1
+                elif isinstance(entry, list) and target in entry:
+                    entry.remove(target)
                     removed += 1
             self._save_sign_data()
             if removed:
@@ -1343,7 +1382,7 @@ class MyPlugin(Star):
             signed = []
             for d in range(1, total + 1):
                 ds = f"{y}-{m:02d}-{d:02d}"
-                if qqid in self.sign_data.get(ds, []):
+                if qqid in self._get_all_signed_qqids(ds):
                     signed.append(d)
             streak = self._sign_consecutive_days(qqid)
             max_streak = self._sign_max_consecutive_days(qqid)
@@ -1394,7 +1433,7 @@ class MyPlugin(Star):
             missed = []
             for d in range(1, today_d):
                 ds = f"{year}-{month:02d}-{d:02d}"
-                if qqid not in self.sign_data.get(ds, []):
+                if qqid not in self._get_all_signed_qqids(ds):
                     missed.append(ds)
             if not missed:
                 yield event.plain_result("本月至今没有漏签，太棒了！")
@@ -1439,7 +1478,7 @@ class MyPlugin(Star):
             yield event.plain_result("只能补签本月的日期。")
             return
         ds = target_date.strftime("%Y-%m-%d")
-        if qqid in self.sign_data.get(ds, []):
+        if qqid in self._get_all_signed_qqids(ds):
             yield event.plain_result(f"{ds} 已经签过到了，不需要补签。")
             return
         days_back = (today - target_date).days
@@ -1467,10 +1506,10 @@ class MyPlugin(Star):
         except Exception as e:
             yield event.plain_result(f"扣款失败：{e}")
             return
-        # 发放补签奖励
-        yesterday_count = len(self.sign_data.get(
-            (target_date + timedelta(days=1)).strftime("%Y-%m-%d"), []
-        ))
+        # 发放补签奖励（仅基于次日正常签到人数，不含补签）
+        next_day = (target_date + timedelta(days=1)).strftime("%Y-%m-%d")
+        next_day_signers_only = self._get_signers_only(next_day)
+        yesterday_count = len(next_day_signers_only)
         reward = 0
         if yesterday_count > 0:
             pool = random.randint(self.sign_money_min, self.sign_money_max)
@@ -1488,10 +1527,12 @@ class MyPlugin(Star):
                         pass
                     yield event.plain_result(f"发放奖励失败，已回滚扣款：{e}")
                     return
-        # 记录补签
-        signers = self.sign_data.get(ds, [])
-        signers.append(qqid)
-        self.sign_data[ds] = signers
+        # 记录补签（写入 backfill 列表，不混入 signers）
+        entry = self.sign_data.get(ds, {"signers": [], "backfill": []})
+        if not isinstance(entry, dict):
+            entry = {"signers": list(entry) if isinstance(entry, list) else [], "backfill": []}
+        entry.setdefault("backfill", []).append(qqid)
+        self.sign_data[ds] = entry
         self._save_sign_data()
         streak = self._sign_consecutive_days(qqid)
         max_streak = self._sign_max_consecutive_days(qqid)
