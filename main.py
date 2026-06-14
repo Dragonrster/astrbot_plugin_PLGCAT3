@@ -636,7 +636,7 @@ class MyPlugin(Star):
         # 用户名
         draw.text((20, y), f"玩家：{user_name}", fill="#333333", font=font_title)
         if mcname:
-            draw.text((20, y + 30), f"MC：{mcname}", fill="#666666", font=font)
+            draw.text((20, y + 30), f"{mcname}", fill="#666666", font=font)
         y += 65
 
         # 铜钱奖励区域
@@ -662,7 +662,7 @@ class MyPlugin(Star):
             ("累计签到", f"{total_days} 天"),
             ("连续签到", f"{streak} 天"),
             ("最高记录", f"{max_streak} 天"),
-            ("当前加成", bonus_pct),
+            ("收益加成", bonus_pct),
         ]
         col_w = (w - 40) // 5
         for i, (label, val) in enumerate(stats):
@@ -1486,22 +1486,46 @@ class MyPlugin(Star):
         today = time.strftime("%Y-%m-%d")
         yesterday = time.strftime("%Y-%m-%d", time.localtime(time.time() - 86400))
         today_entry = self.sign_data.get(today, {"signers": [], "backfill": []})
+        today_count = len(today_entry.get("signers", [])) + len(today_entry.get("backfill", []))
+        yesterday_signers_only = self._get_signers_only(yesterday)
+        yesterday_count = len(yesterday_signers_only)
+        streak = self._sign_consecutive_days(qqid)
+        max_streak = self._sign_max_consecutive_days(qqid)
+        fortune = self._generate_fortune(qqid, today)
+        total_days = self._get_total_sign_days(qqid)
+        bonus_mult, bonus_desc = self._sign_bonus_multiplier(streak)
+
         if qqid in self._get_all_signed_qqids(today):
-            yield event.plain_result("你今天已经签到过了，明天再来吧！")
+            # 已签到，显示完整信息卡片
+            already_img = self._generate_sign_card(
+                user_name, mcname, 0, 0, yesterday_count,
+                today_count, streak, max_streak, fortune,
+                no_reward_reason="✅ 今日已签到",
+                total_days=total_days,
+            )
+            if already_img:
+                try:
+                    import base64
+                    b64 = base64.b64encode(already_img).decode()
+                    chain = MessageChain().base64_image(b64)
+                    yield event.chain_result(chain)
+                    return
+                except Exception as e:
+                    logger.warning(f"[mcsign] 发送已签到卡片失败: {e}")
+            lines = [
+                "✅ 今日已签到",
+                f"累计 {total_days} 天  |  连续 {streak} 天  |  最高 {max_streak} 天  |  加成 {bonus_desc or '无'}",
+                f"今日占卜：{fortune['level']}  幸运色 {fortune['color']}  幸运数字 {fortune['number']}",
+                f"签文：{fortune['message']}",
+            ]
+            yield event.plain_result("\n".join(lines))
             return
         # 记录签到
         today_entry["signers"].append(qqid)
         self.sign_data[today] = today_entry
         self._save_sign_data()
         today_count = len(today_entry["signers"]) + len(today_entry.get("backfill", []))
-        yesterday_signers_only = self._get_signers_only(yesterday)
-        yesterday_count = len(yesterday_signers_only)
-        streak = self._sign_consecutive_days(qqid)
-        max_streak = self._sign_max_consecutive_days(qqid)
-        fortune = self._generate_fortune(qqid, today)
-
-        total_days = self._get_total_sign_days(qqid)
-        bonus_mult, bonus_desc = self._sign_bonus_multiplier(streak)
+        total_days += 1  # 刚签到，累计+1
         reward = 0
         base_reward = 0
         pool = 0
