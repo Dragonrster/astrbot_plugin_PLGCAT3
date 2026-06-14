@@ -1,5 +1,6 @@
 import asyncio
 import calendar
+import io
 import json
 import random
 import struct
@@ -619,10 +620,11 @@ class MyPlugin(Star):
         if line:
             draw.text((30, msg_y), line, fill="#333333", font=font_title)
 
-        import io
         buf = io.BytesIO()
         img.save(buf, format="PNG", optimize=True)
         return buf.getvalue()
+
+    def _generate_sign_calendar(self, qqid: str, user_name: str, year: int = None, month: int = None) -> bytes | None:
         """生成签到日历图片，返回 PNG bytes。需要 Pillow。"""
         if not _HAS_PIL:
             return None
@@ -641,9 +643,9 @@ class MyPlugin(Star):
                 signed_days.add(d)
 
         # 字体
-        font = _get_sign_cal_font(14, self.sign_cal_font_cache_dir)
-        font_title = _get_sign_cal_font(24, self.sign_cal_font_cache_dir)
-        font_day = _get_sign_cal_font(20, self.sign_cal_font_cache_dir)
+        font = _get_sign_cal_font(14, self.sign_cal_font_cache_dir, self.sign_cal_font_path)
+        font_title = _get_sign_cal_font(24, self.sign_cal_font_cache_dir, self.sign_cal_font_path)
+        font_day = _get_sign_cal_font(20, self.sign_cal_font_cache_dir, self.sign_cal_font_path)
 
         cell_w, cell_h = 64, 56
         cols = 7
@@ -715,10 +717,11 @@ class MyPlugin(Star):
         draw.rectangle([pad_x + 146, ly, pad_x + 160, ly + 14], fill="#F8F9FA", outline="#E0E0E0")
         draw.text((pad_x + 164, ly - 1), "未签到", fill="#999999", font=font)
 
-        import io
         buf = io.BytesIO()
         img.save(buf, format="PNG", optimize=True)
         return buf.getvalue()
+
+    def _log_transfer(self, sender_qq: str, sender_mc: str, receiver_qq: str, receiver_mc: str, amount: int, balance_after: int | None):
         record = {
             "time": time.strftime("%Y-%m-%d %H:%M:%S"),
             "sender_qq": sender_qq,
