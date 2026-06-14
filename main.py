@@ -508,7 +508,78 @@ class MyPlugin(Star):
         levels = ["大吉", "中吉", "小吉", "吉", "末吉", "凶"]
         weights = [10, 20, 25, 25, 15, 5]
         level = rng.choices(levels, weights=weights, k=1)[0]
-        colors = ["红色", "橙色", "黄色", "绿色", "蓝色", "紫色", "白色", "粉色", "金色"]
+        colors = [
+            "赤",
+            "朱",
+            "丹",
+            "绛",
+            "绯",
+            "炎",
+            "彤",
+            "赭赤",  # 红色类
+            "橘黄",
+            "杏黄",
+            "琥珀",
+            "橙黄",
+            "金驼",
+            "蜜色",  # 橙色类
+            "黄",
+            "金",
+            "缃",
+            "栀",
+            "葵黄",
+            "秋香",
+            "鹅黄",
+            "藤黄",
+            "绿",
+            "碧",
+            "翠",
+            "青葱",
+            "竹青",
+            "松柏绿",
+            "艾绿",
+            "石绿",
+            "蓝",
+            "青",
+            "黛",
+            "苍",
+            "靛蓝",
+            "鸦青",
+            "月白",
+            "天青",
+            "紫",
+            "紫棠",
+            "丁香",
+            "藕荷",
+            "青莲",
+            "紫罗",
+            "紫藤",
+            "紫灰",
+            "白",
+            "素",
+            "皓",
+            "雪",
+            "霜色",
+            "银白",
+            "月白",
+            "荼白",
+            "粉",
+            "绯",
+            "桃",
+            "胭脂",
+            "水红",
+            "粉黛",
+            "杨妃色",
+            "十样锦",
+            "金",
+            "赤金",
+            "鎏金",
+            "黄白",
+            "金箔色",
+            "耀金",
+            "秋金色",
+            "金粟",
+        ]
         lucky_color = rng.choice(colors)
         lucky_num = rng.randint(1, 99)
         messages = {
@@ -630,17 +701,20 @@ class MyPlugin(Star):
         y += 95
 
         # 统计数据
+        bonus_pct = bonus_desc if bonus_desc else "无"
         stats = [
             ("今日签到", f"{today_count} 人"),
             ("连续签到", f"{streak} 天"),
             ("最高记录", f"{max_streak} 天"),
+            ("当前加成", bonus_pct),
         ]
-        col_w = (w - 40) // 3
+        col_w = (w - 40) // 4
         for i, (label, val) in enumerate(stats):
             cx = 20 + i * col_w
-            draw.rectangle([cx, y, cx + col_w - 10, y + 55], fill="#F5F5F5", outline="#E0E0E0", width=1)
-            draw.text((cx + 10, y + 6), label, fill="#999999", font=font)
-            draw.text((cx + 10, y + 26), val, fill="#333333", font=font_title)
+            draw.rectangle([cx, y, cx + col_w - 6, y + 55], fill="#F5F5F5", outline="#E0E0E0", width=1)
+            draw.text((cx + 8, y + 6), label, fill="#999999", font=font)
+            val_color = "#4CAF50" if bonus_desc and i == 3 else "#333333"
+            draw.text((cx + 8, y + 26), val, fill=val_color, font=font_title)
         y += 70
 
         # 占卜区域
