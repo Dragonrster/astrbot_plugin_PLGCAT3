@@ -491,6 +491,21 @@ class MyPlugin(Star):
         return max(max_streak, cur_streak)
 
     @staticmethod
+    def _sign_bonus_multiplier(streak: int) -> tuple[float, str]:
+        """连续签到加成倍率，返回 (倍率, 描述文字)。"""
+        tiers = [
+            (10, 2.5, "+150%"),
+            (7,  2.0, "+100%"),
+            (5,  1.5, "+50%"),
+            (3,  1.2, "+20%"),
+            (2,  1.1, "+10%"),
+        ]
+        for min_days, mult, desc in tiers:
+            if streak >= min_days:
+                return mult, desc
+        return 1.0, ""
+
+    @staticmethod
     def _generate_fortune(qqid: str, date_str: str) -> dict:
         """基于 QQ 号和日期生成每日占卜（同一天同一人结果固定）。"""
         seed = hash(f"{qqid}:{date_str}") & 0xFFFFFFFF
@@ -507,36 +522,66 @@ class MyPlugin(Star):
                 "今日宜大展宏图，诸事皆宜。",
                 "好运连连，贵人相助。",
                 "时来运转，心想事成。",
+
+                "财源广进，喜事临门。",
+                "所谋皆成，所愿皆得。",
+                "气场全开，所向披靡。",
+                "福星高照，百无禁忌。",
             ],
             "中吉": [
                 "稳中求进，事半功倍。",
                 "脚踏实地，自有收获。",
                 "今日适合处理积压事务。",
                 "人缘颇佳，合作有利。",
+
+                "付出有报，水到渠成。",
+                "小试牛刀，亦可出彩。",
+                "贵人暗助，顺风顺水。",
+                "心平气和，诸事可期。",
             ],
             "小吉": [
                 "小有收获，宜保持平常心。",
                 "今日宜整理内务，不宜远行。",
                 "细水长流，循序渐进。",
                 "注意细节，防微杜渐。",
+
+                "微小的进步也值得庆祝。",
+                "宜静心计划，忌草率行事。",
+                "一得一失，不必挂怀。",
+                "今日种因，他日结果。",
             ],
             "吉": [
                 "平平淡淡才是真。",
                 "今日无大碍，宜守不宜攻。",
                 "稳扎稳打，不必冒进。",
                 "今日适合学习充电。",
+
+                "无风无浪，便是好日。",
+                "宜整理心情，轻装上阵。",
+                "守成有余，开拓不足。",
+                "小确幸藏于日常之中。",
             ],
             "末吉": [
                 "柳暗花明，耐心等待。",
                 "今日宜反思，不宜冲动。",
                 "蓄力待发，时机未到。",
                 "低调行事，静待转机。",
+
+                "山重水复，终有路转。",
+                "宜韬光养晦，莫争一时。",
+                "挫折是暂时的阶梯。",
+                "今日沉淀，明日腾飞。",
             ],
             "凶": [
                 "今日宜静不宜动，小心行事。",
                 "注意安全，避免争执。",
                 "退一步海阔天空。",
                 "今日破财免灾，莫要心疼。",
+
+                "诸事放缓，以静制动。",
+                "口舌是非，谨言慎行。",
+                "不利远行，注意财物。",
+                "忍一时风平浪静。",
             ],
         }
         msg = rng.choice(messages.get(level, ["万事随缘。"]))
@@ -546,6 +591,7 @@ class MyPlugin(Star):
         self, user_name: str, mcname: str | None, reward: int, pool: int,
         yesterday_count: int, today_count: int, streak: int, max_streak: int,
         fortune: dict, no_reward_reason: str = "",
+        base_reward: int = 0, bonus_desc: str = "",
     ) -> bytes | None:
         """生成签到结果卡片图片，返回 PNG bytes。"""
         if not _HAS_PIL:
@@ -580,7 +626,10 @@ class MyPlugin(Star):
             draw.text((30, y + 8), "获得铜钱", fill="#666666", font=font)
             draw.text((30, y + 30), f"+{reward}", fill="#E65100", font=font_big)
             bw = draw.textbbox((0, 0), f"+{reward}", font=font_big)
-            draw.text((30 + (bw[2] - bw[0]) + 10, y + 42), f"奖池 {pool} / {yesterday_count} 人", fill="#999999", font=font)
+            info_parts = [f"奖池 {pool} / {yesterday_count} 人"]
+            if bonus_desc and base_reward > 0:
+                info_parts.append(f"连续加成 {bonus_desc}（基础 {base_reward}）")
+            draw.text((30 + (bw[2] - bw[0]) + 10, y + 42), "  |  ".join(info_parts), fill="#999999", font=font)
         else:
             draw.text((30, y + 20), "昨日无人签到，今日无奖励", fill="#999999", font=font)
         y += 95
@@ -1425,15 +1474,18 @@ class MyPlugin(Star):
         max_streak = self._sign_max_consecutive_days(qqid)
         fortune = self._generate_fortune(qqid, today)
 
+        bonus_mult, bonus_desc = self._sign_bonus_multiplier(streak)
         reward = 0
+        base_reward = 0
         pool = 0
         no_reward_reason = ""
         if not mcname:
             no_reward_reason = "未绑定MC账号，不发放铜钱"
         elif yesterday_count > 0:
             pool = random.randint(self.sign_money_min, self.sign_money_max)
-            reward = pool // yesterday_count
-            if reward > 0:
+            base_reward = pool // yesterday_count
+            if base_reward > 0:
+                reward = int(base_reward * bonus_mult)
                 cmd = self.sign_money_command.replace("{name}", mcname).replace("{amount}", str(reward))
                 try:
                     await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, cmd)
@@ -1449,6 +1501,7 @@ class MyPlugin(Star):
         img_bytes = self._generate_sign_card(
             user_name, mcname, reward, pool, yesterday_count,
             today_count, streak, max_streak, fortune, no_reward_reason,
+            base_reward, bonus_desc,
         )
         if img_bytes:
             try:
@@ -1465,7 +1518,8 @@ class MyPlugin(Star):
             f"签到成功！{'（' + no_reward_reason + '）' if no_reward_reason else ''}",
         ]
         if reward > 0:
-            lines[0] = f"签到成功！{mcname} +{reward} 铜钱（奖池 {pool} / {yesterday_count} 人）"
+            bonus_info = f"  连续加成 {bonus_desc}（基础 {base_reward}）" if bonus_desc else ""
+            lines[0] = f"签到成功！{mcname} +{reward} 铜钱（奖池 {pool} / {yesterday_count} 人{bonus_info}）"
         lines.append(f"今日已签到 {today_count} 人  |  连续 {streak} 天  |  最高 {max_streak} 天")
         lines.append(f"今日占卜：{fortune['level']}  幸运色 {fortune['color']}  幸运数字 {fortune['number']}")
         lines.append(f"签文：{fortune['message']}")
