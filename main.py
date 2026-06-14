@@ -489,7 +489,140 @@ class MyPlugin(Star):
                 cur_streak = 1
         return max(max_streak, cur_streak)
 
-    def _generate_sign_calendar(self, qqid: str, user_name: str, year: int = None, month: int = None) -> bytes | None:
+    @staticmethod
+    def _generate_fortune(qqid: str, date_str: str) -> dict:
+        """基于 QQ 号和日期生成每日占卜（同一天同一人结果固定）。"""
+        seed = hash(f"{qqid}:{date_str}") & 0xFFFFFFFF
+        rng = random.Random(seed)
+        levels = ["大吉", "中吉", "小吉", "吉", "末吉", "凶"]
+        weights = [10, 20, 25, 25, 15, 5]
+        level = rng.choices(levels, weights=weights, k=1)[0]
+        colors = ["红色", "橙色", "黄色", "绿色", "蓝色", "紫色", "白色", "粉色", "金色"]
+        lucky_color = rng.choice(colors)
+        lucky_num = rng.randint(1, 99)
+        messages = {
+            "大吉": [
+                "鸿运当头，万事皆顺。",
+                "今日宜大展宏图，诸事皆宜。",
+                "好运连连，贵人相助。",
+                "时来运转，心想事成。",
+            ],
+            "中吉": [
+                "稳中求进，事半功倍。",
+                "脚踏实地，自有收获。",
+                "今日适合处理积压事务。",
+                "人缘颇佳，合作有利。",
+            ],
+            "小吉": [
+                "小有收获，宜保持平常心。",
+                "今日宜整理内务，不宜远行。",
+                "细水长流，循序渐进。",
+                "注意细节，防微杜渐。",
+            ],
+            "吉": [
+                "平平淡淡才是真。",
+                "今日无大碍，宜守不宜攻。",
+                "稳扎稳打，不必冒进。",
+                "今日适合学习充电。",
+            ],
+            "末吉": [
+                "柳暗花明，耐心等待。",
+                "今日宜反思，不宜冲动。",
+                "蓄力待发，时机未到。",
+                "低调行事，静待转机。",
+            ],
+            "凶": [
+                "今日宜静不宜动，小心行事。",
+                "注意安全，避免争执。",
+                "退一步海阔天空。",
+                "今日破财免灾，莫要心疼。",
+            ],
+        }
+        msg = rng.choice(messages.get(level, ["万事随缘。"]))
+        return {"level": level, "color": lucky_color, "number": lucky_num, "message": msg}
+
+    def _generate_sign_card(
+        self, user_name: str, mcname: str | None, reward: int, pool: int,
+        yesterday_count: int, today_count: int, streak: int, max_streak: int,
+        fortune: dict, no_reward_reason: str = "",
+    ) -> bytes | None:
+        """生成签到结果卡片图片，返回 PNG bytes。"""
+        if not _HAS_PIL:
+            return None
+        font = _get_sign_cal_font(14, self.sign_cal_font_cache_dir, self.sign_cal_font_path)
+        font_title = _get_sign_cal_font(22, self.sign_cal_font_cache_dir, self.sign_cal_font_path)
+        font_big = _get_sign_cal_font(36, self.sign_cal_font_cache_dir, self.sign_cal_font_path)
+        font_fortune = _get_sign_cal_font(28, self.sign_cal_font_cache_dir, self.sign_cal_font_path)
+
+        w, h = 420, 500
+        img = Image.new("RGB", (w, h), "#FFFFFF")
+        draw = ImageDraw.Draw(img)
+
+        # 顶部绿色横幅
+        draw.rectangle([0, 0, w, 70], fill="#4CAF50")
+        draw.text((20, 18), "每日签到", fill="#FFFFFF", font=font_title)
+        today_str = time.strftime("%Y-%m-%d")
+        draw.text((w - 130, 24), today_str, fill="#E8F5E9", font=font)
+
+        y = 85
+        # 用户名
+        draw.text((20, y), f"玩家：{user_name}", fill="#333333", font=font_title)
+        if mcname:
+            draw.text((20, y + 30), f"MC：{mcname}", fill="#666666", font=font)
+        y += 65
+
+        # 铜钱奖励区域
+        draw.rectangle([15, y, w - 15, y + 80], fill="#FFF8E1", outline="#FFB74D", width=2)
+        if no_reward_reason:
+            draw.text((30, y + 10), no_reward_reason, fill="#999999", font=font)
+        elif reward > 0:
+            draw.text((30, y + 8), "获得铜钱", fill="#666666", font=font)
+            draw.text((30, y + 30), f"+{reward}", fill="#E65100", font=font_big)
+            bw = draw.textbbox((0, 0), f"+{reward}", font=font_big)
+            draw.text((30 + (bw[2] - bw[0]) + 10, y + 42), f"奖池 {pool} / {yesterday_count} 人", fill="#999999", font=font)
+        else:
+            draw.text((30, y + 20), "昨日无人签到，今日无奖励", fill="#999999", font=font)
+        y += 95
+
+        # 统计数据
+        stats = [
+            ("今日签到", f"{today_count} 人"),
+            ("连续签到", f"{streak} 天"),
+            ("最高记录", f"{max_streak} 天"),
+        ]
+        col_w = (w - 40) // 3
+        for i, (label, val) in enumerate(stats):
+            cx = 20 + i * col_w
+            draw.rectangle([cx, y, cx + col_w - 10, y + 55], fill="#F5F5F5", outline="#E0E0E0", width=1)
+            draw.text((cx + 10, y + 6), label, fill="#999999", font=font)
+            draw.text((cx + 10, y + 26), val, fill="#333333", font=font_title)
+        y += 70
+
+        # 占卜区域
+        draw.rectangle([15, y, w - 15, y + 150], fill="#F3E5F5", outline="#CE93D8", width=2)
+        draw.text((30, y + 10), "今日占卜", fill="#7B1FA2", font=font_title)
+        level = fortune["level"]
+        level_colors = {"大吉": "#D32F2F", "中吉": "#F57C00", "小吉": "#FBC02D", "吉": "#388E3C", "末吉": "#1976D2", "凶": "#616161"}
+        draw.text((30, y + 40), level, fill=level_colors.get(level, "#333333"), font=font_fortune)
+        draw.text((30 + 100, y + 48), f"  幸运色 {fortune['color']}  |  幸运数字 {fortune['number']}", fill="#666666", font=font)
+        # 签文自动换行
+        msg = fortune["message"]
+        line = ""
+        msg_y = y + 85
+        for ch in msg:
+            line += ch
+            bbox = draw.textbbox((0, 0), line, font=font_title)
+            if bbox[2] - bbox[0] > w - 80:
+                draw.text((30, msg_y), line, fill="#333333", font=font_title)
+                msg_y += 28
+                line = ""
+        if line:
+            draw.text((30, msg_y), line, fill="#333333", font=font_title)
+
+        import io
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        return buf.getvalue()
         """生成签到日历图片，返回 PNG bytes。需要 Pillow。"""
         if not _HAS_PIL:
             return None
@@ -998,7 +1131,7 @@ class MyPlugin(Star):
                 "  [管] /mcbroadcast <内容>  广播（mcb）",
                 "",
                 "【经济】",
-                f"  /mcsign  每日签到（{sign}，mcqd）",
+                f"  /mcsign  每日签到+占卜（{sign}，mcqd）",
                 "  /mcsigncal  签到日历（mcsigncalendar）",
                 "  /mcsignback [日期]  补签（mcbq）",
                 "  /mcmoney  查询铜钱（mcqian）",
@@ -1269,6 +1402,7 @@ class MyPlugin(Star):
             yield event.plain_result("抱歉，签到功能未开启。")
             return
         qqid = str(event.get_sender_id())
+        user_name = event.get_sender_name()
         bound = self.apply_data.get(qqid, [])
         mcname = bound[0] if bound else None
         today = time.strftime("%Y-%m-%d")
@@ -1282,18 +1416,18 @@ class MyPlugin(Star):
         self.sign_data[today] = today_entry
         self._save_sign_data()
         today_count = len(today_entry["signers"]) + len(today_entry.get("backfill", []))
-        # 奖励仅基于昨日正常签到人数（不含补签）
         yesterday_signers_only = self._get_signers_only(yesterday)
         yesterday_count = len(yesterday_signers_only)
         streak = self._sign_consecutive_days(qqid)
         max_streak = self._sign_max_consecutive_days(qqid)
+        fortune = self._generate_fortune(qqid, today)
+
+        reward = 0
+        pool = 0
+        no_reward_reason = ""
         if not mcname:
-            yield event.plain_result(
-                f"签到成功！（未绑定MC账号，不发放铜钱）\n"
-                f"今日已签到 {today_count} 人  |  连续 {streak} 天  |  最高 {max_streak} 天"
-            )
-            return
-        if yesterday_count > 0:
+            no_reward_reason = "未绑定MC账号，不发放铜钱"
+        elif yesterday_count > 0:
             pool = random.randint(self.sign_money_min, self.sign_money_max)
             reward = pool // yesterday_count
             if reward > 0:
@@ -1303,21 +1437,36 @@ class MyPlugin(Star):
                 except Exception as e:
                     yield event.plain_result(f"签到失败：{e}")
                     return
-                yield event.plain_result(
-                    f"签到成功！{mcname} +{reward} 铜钱\n"
-                    f"奖池 {pool} / 昨日 {yesterday_count} 人 = 每人 {reward}\n"
-                    f"今日已签到 {today_count} 人  |  连续 {streak} 天  |  最高 {max_streak} 天"
-                )
             else:
-                yield event.plain_result(
-                    f"签到成功！昨日 {yesterday_count} 人签到，奖池不足以平分\n"
-                    f"今日已签到 {today_count} 人  |  连续 {streak} 天  |  最高 {max_streak} 天"
-                )
+                no_reward_reason = "昨日签到人数过多，奖池不足以平分"
         else:
-            yield event.plain_result(
-                f"签到成功！昨日无人签到，今日无奖励\n"
-                f"今日已签到 {today_count} 人  |  连续 {streak} 天  |  最高 {max_streak} 天"
-            )
+            no_reward_reason = "昨日无人签到，今日无奖励"
+
+        # 尝试生成图片卡片
+        img_bytes = self._generate_sign_card(
+            user_name, mcname, reward, pool, yesterday_count,
+            today_count, streak, max_streak, fortune, no_reward_reason,
+        )
+        if img_bytes:
+            try:
+                import base64
+                b64 = base64.b64encode(img_bytes).decode()
+                chain = MessageChain().base64_image(b64)
+                yield event.chain_result(chain)
+                return
+            except Exception as e:
+                logger.warning(f"[mcsign] 发送签到卡片失败: {e}")
+
+        # 图片兜底
+        lines = [
+            f"签到成功！{'（' + no_reward_reason + '）' if no_reward_reason else ''}",
+        ]
+        if reward > 0:
+            lines[0] = f"签到成功！{mcname} +{reward} 铜钱（奖池 {pool} / {yesterday_count} 人）"
+        lines.append(f"今日已签到 {today_count} 人  |  连续 {streak} 天  |  最高 {max_streak} 天")
+        lines.append(f"今日占卜：{fortune['level']}  幸运色 {fortune['color']}  幸运数字 {fortune['number']}")
+        lines.append(f"签文：{fortune['message']}")
+        yield event.plain_result("\n".join(lines))
 
     @filter.command("mcsignreset", desc="重置签到记录（管理员）", alias={"mcsignr"})
     async def mcsignreset(self, event: AstrMessageEvent, target: str = ""):
