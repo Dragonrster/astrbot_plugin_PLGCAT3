@@ -325,6 +325,8 @@ class MyPlugin(Star):
         self.sign_cal_font_cache_dir = os.path.join(self.plugin_data_dir, "fonts")
         self.sign_file = os.path.join(self.plugin_data_dir, "sign_data.json")
         self.sign_data = self._load_sign_data()
+        self.sign_admin_file = os.path.join(self.plugin_data_dir, "sign_admin.json")
+        self.sign_admin_data = self._load_sign_admin_data()
         self.transfer_log_file = os.path.join(self.plugin_data_dir, "transfer_log.jsonl")
         self.mcrun_blocked_first = set(_MCRUN_DEFAULT_BLOCKED_FIRST)
         extra = self.config.get("mcrun_blocked_extra", [])
@@ -443,6 +445,26 @@ class MyPlugin(Star):
         with open(self.sign_file, "w", encoding="utf-8") as f:
             json.dump(self.sign_data, f, ensure_ascii=False, indent=2)
 
+    def _load_sign_admin_data(self) -> dict:
+        """加载管理员签到覆盖数据。格式: {qqid: {"total_days": int, "max_streak": int}}"""
+        if os.path.exists(self.sign_admin_file):
+            try:
+                with open(self.sign_admin_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {}
+
+    def _save_sign_admin_data(self):
+        with open(self.sign_admin_file, "w", encoding="utf-8") as f:
+            json.dump(self.sign_admin_data, f, ensure_ascii=False, indent=2)
+
+    def _get_total_sign_days(self, qqid: str) -> int:
+        """获取累计签到天数（实际记录 + 管理员覆盖）"""
+        actual = sum(1 for ds in self.sign_data if qqid in self._get_all_signed_qqids(ds))
+        admin_override = self.sign_admin_data.get(qqid, {}).get("total_days", 0)
+        return max(actual, admin_override)
+
     def _get_all_signed_qqids(self, date_str: str) -> list[str]:
         """获取某天所有签到的 QQ（正常签到 + 补签）"""
         entry = self.sign_data.get(date_str, {})
@@ -472,23 +494,25 @@ class MyPlugin(Star):
         return streak
 
     def _sign_max_consecutive_days(self, qqid: str) -> int:
-        """计算历史最高连续签到天数（遍历所有签到记录，含补签）"""
+        """计算历史最高连续签到天数（遍历所有签到记录，含补签，取管理员覆盖较大值）"""
         signed = sorted(
             ds for ds in self.sign_data if qqid in self._get_all_signed_qqids(ds)
         )
-        if not signed:
-            return 0
-        max_streak = 1
-        cur_streak = 1
-        for i in range(1, len(signed)):
-            prev = datetime.strptime(signed[i - 1], "%Y-%m-%d").date()
-            cur = datetime.strptime(signed[i], "%Y-%m-%d").date()
-            if (cur - prev).days == 1:
-                cur_streak += 1
-            else:
-                max_streak = max(max_streak, cur_streak)
-                cur_streak = 1
-        return max(max_streak, cur_streak)
+        calculated = 0
+        if signed:
+            max_streak = 1
+            cur_streak = 1
+            for i in range(1, len(signed)):
+                prev = datetime.strptime(signed[i - 1], "%Y-%m-%d").date()
+                cur = datetime.strptime(signed[i], "%Y-%m-%d").date()
+                if (cur - prev).days == 1:
+                    cur_streak += 1
+                else:
+                    max_streak = max(max_streak, cur_streak)
+                    cur_streak = 1
+            calculated = max(max_streak, cur_streak)
+        admin_override = self.sign_admin_data.get(qqid, {}).get("max_streak", 0)
+        return max(calculated, admin_override)
 
     @staticmethod
     def _sign_bonus_multiplier(streak: int) -> tuple[float, str]:
@@ -1255,6 +1279,7 @@ class MyPlugin(Star):
                 f"  /mcsign  每日签到+占卜（{sign}，mcqd）",
                 "  /mcsigncal  签到日历（mcsigncalendar）",
                 "  /mcsignback [日期]  补签（mcbq）",
+                "  [管] /mcsignadmin  签到数据管理（msa）",
                 "  /mcmoney  查询铜钱（mcqian）",
                 "  /mctransfer <MC名> <数量>  转账（mczz）",
                 "",
@@ -1625,6 +1650,90 @@ class MyPlugin(Star):
                 yield event.plain_result(f"已从 {removed} 天的签到记录中移除 QQ {target}。")
             else:
                 yield event.plain_result(f"QQ {target} 没有签到记录。")
+
+    @filter.command("mcsignadmin", desc="管理员签到数据修改", alias={"msa"})
+    async def mcsignadmin(self, event: AstrMessageEvent):
+        if not self.is_admin(str(event.get_sender_id())):
+            yield event.plain_result("抱歉，你没有权限执行此操作。")
+            return
+        raw = self._tail_after_command_names(event, "mcsignadmin", "msa")
+        parts = raw.strip().split()
+        if len(parts) < 2:
+            yield event.plain_result(
+                "用法：\n"
+                "  /mcsignadmin backfill <QQ号> <天数>  从今天往前补签N天\n"
+                "  /mcsignadmin total <QQ号> <天数>  设置累计签到天数\n"
+                "  /mcsignadmin maxstreak <QQ号> <天数>  设置最高连续签到\n"
+                "  /mcsignadmin info <QQ号>  查看签到数据"
+            )
+            return
+        action = parts[0].lower()
+        target_qq = parts[1]
+
+        if action == "info":
+            actual_days = sum(1 for ds in self.sign_data if target_qq in self._get_all_signed_qqids(ds))
+            total_days = self._get_total_sign_days(target_qq)
+            current_streak = self._sign_consecutive_days(target_qq)
+            max_streak = self._sign_max_consecutive_days(target_qq)
+            admin = self.sign_admin_data.get(target_qq, {})
+            lines = [
+                f"═══ 签到数据 {target_qq} ═══",
+                f"累计签到：{total_days} 天（实际记录 {actual_days}）",
+                f"当前连续：{current_streak} 天",
+                f"最高连续：{max_streak} 天",
+            ]
+            if admin:
+                lines.append(f"管理员覆盖：{admin}")
+            yield event.plain_result("\n".join(lines))
+            return
+
+        if len(parts) < 3:
+            yield event.plain_result("缺少参数，请指定天数。")
+            return
+        try:
+            days = int(parts[2])
+        except ValueError:
+            yield event.plain_result("天数必须是整数。")
+            return
+        if days < 0:
+            yield event.plain_result("天数不能为负数。")
+            return
+
+        if action == "backfill":
+            today = datetime.now().date()
+            added = 0
+            skipped = 0
+            for i in range(1, days + 1):
+                d = today - timedelta(days=i)
+                ds = d.strftime("%Y-%m-%d")
+                if target_qq in self._get_all_signed_qqids(ds):
+                    skipped += 1
+                    continue
+                entry = self.sign_data.get(ds, {"signers": [], "backfill": []})
+                if not isinstance(entry, dict):
+                    entry = {"signers": list(entry) if isinstance(entry, list) else [], "backfill": []}
+                entry.setdefault("backfill", []).append(target_qq)
+                self.sign_data[ds] = entry
+                added += 1
+            self._save_sign_data()
+            yield event.plain_result(f"补签完成：为 QQ {target_qq} 补签了最近 {days} 天\n新增 {added} 天，已有 {skipped} 天跳过")
+
+        elif action == "total":
+            if target_qq not in self.sign_admin_data:
+                self.sign_admin_data[target_qq] = {}
+            self.sign_admin_data[target_qq]["total_days"] = days
+            self._save_sign_admin_data()
+            yield event.plain_result(f"已设置 QQ {target_qq} 累计签到为 {days} 天")
+
+        elif action == "maxstreak":
+            if target_qq not in self.sign_admin_data:
+                self.sign_admin_data[target_qq] = {}
+            self.sign_admin_data[target_qq]["max_streak"] = days
+            self._save_sign_admin_data()
+            yield event.plain_result(f"已设置 QQ {target_qq} 最高连续签到为 {days} 天")
+
+        else:
+            yield event.plain_result(f"未知操作：{action}，支持 backfill / total / maxstreak / info")
 
     @filter.command("mcsigncal", desc="查看签到日历", alias={"mcsigncalendar", "mcqc"})
     async def mcsigncal(self, event: AstrMessageEvent):
