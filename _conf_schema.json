@@ -1,0 +1,148 @@
+{
+  "rcon_host": {
+    "description": "MC 服务器 RCON 地址或域名",
+    "type": "string",
+    "default": "localhost",
+    "hint": "例如 127.0.0.1 或者 mc.example.com"
+  },
+  "rcon_port": {
+    "description": "RCON 端口号",
+    "type": "int",
+    "default": 25575
+  },
+  "mc_server_port": {
+    "description": "MC 服务端游戏端口（用于 Server List Ping 获取完整玩家列表）",
+    "type": "int",
+    "default": 25565,
+    "hint": "默认 25565，与 server.properties 中的 server-port 一致"
+  },
+  "rcon_password": {
+    "description": "RCON 密码",
+    "type": "string",
+    "default": ""
+  },
+  "whitelist_command": {
+    "description": "whitelist命令名",
+    "type": "string",
+    "default": "whitelist",
+    "hint": "原版为whitelist, 可改成swl等白名单插件"
+  },
+  "admin_qqs": {
+    "description": "允许使用敏感命令的 QQ 列表",
+    "type": "list",
+    "items": {
+      "type": "string"
+    },
+    "default": []
+  },
+  "enable_apply_whitelist": {
+    "description": "是否开启玩家自主申请白名单",
+    "type": "bool",
+    "default": false
+  },
+  "whitelist_verify_mode": {
+    "description": "白名单绑定验证方式",
+    "type": "string",
+    "default": "code",
+    "hint": "none=无需验证直接绑定, online=要求玩家在线, code=游戏内验证码确认（最安全）"
+  },
+  "mcrun_blocked_extra": {
+    "description": "在 /mcrun 默认拦截的首词之外追加禁止项（小写，与命令第一个词比较，不含命名空间前缀）",
+    "type": "list",
+    "items": {
+      "type": "string"
+    },
+    "default": [],
+    "hint": "默认已拦截 stop、restart、op、deop、reload；例如追加 rl、bukkit:reload 的首词 rl"
+  },
+  "mc_chat_log_to_qq_enabled": {
+    "description": "是否监听 MC 服务端聊天并转发到 QQ",
+    "type": "bool",
+    "default": false
+  },
+  "mc_chat_source": {
+    "description": "聊天消息来源",
+    "type": "string",
+    "default": "file",
+    "hint": "file=读取本地日志文件, mcsm=通过 MCSM 面板 WebSocket 实时获取"
+  },
+  "mc_chat_log_path": {
+    "description": "服务端 latest.log 的绝对路径，例如 Windows: D:/server/logs/latest.log；Linux: /home/mc/server/logs/latest.log",
+    "type": "string",
+    "default": "",
+    "hint": "与开服端 logs/latest.log 一致；远程服需挂载或改用服内插件上报"
+  },
+  "mc_chat_trigger_prefix": {
+    "description": "游戏内聊天里、紧跟在 <玩家名> 后的触发前缀，匹配后才转发到 QQ（不含玩家名本身）",
+    "type": "string",
+    "default": ".mcsay "
+  },
+  "mc_chat_unified_msg_origin": {
+    "description": "转发目标会话 ID（与 event.unified_msg_origin 相同）。留空可在群内用管理员命令 /mcbindchat 写入数据文件",
+    "type": "string",
+    "default": ""
+  },
+  "mc_chat_qq_group_id": {
+    "description": "若未填 unified_msg_origin，可填 QQ 群号字符串，配合 mc_chat_qq_platform 用 StarTools.send_message_by_id 发群消息",
+    "type": "string",
+    "default": ""
+  },
+  "mc_chat_qq_platform": {
+    "description": "send_message_by_id 使用的平台名，一般为 aiocqhttp",
+    "type": "string",
+    "default": "aiocqhttp"
+  },
+  "mc_chat_log_tail_from_end": {
+    "description": "启动时是否从日志文件末尾开始读，避免把历史聊天一次性转发到 QQ",
+    "type": "bool",
+    "default": true
+  },
+  "enable_sign": {
+    "description": "是否开启每日签到功能（需先开启白名单申请并绑定账号）",
+    "type": "bool",
+    "default": false
+  },
+  "sign_money_min": {
+    "description": "签到随机铜钱最低值",
+    "type": "int",
+    "default": 10
+  },
+  "sign_money_max": {
+    "description": "签到随机铜钱最高值",
+    "type": "int",
+    "default": 100
+  },
+  "sign_money_command": {
+    "description": "签到加钱的 RCON 命令模板，{name} 会被替换为玩家名，{amount} 会被替换为铜钱数",
+    "type": "string",
+    "default": "d money add {name} {amount}",
+    "hint": "例如 EssentialsX 用: eco give {name} {amount}"
+  },
+  "money_command_prefix": {
+    "description": "铜钱系统命令前缀，用于查询/操作余额",
+    "type": "string",
+    "default": "d money",
+    "hint": "查询时拼接为: {prefix} get {name}"
+  },
+  "mcsm_panel_url": {
+    "description": "MCSM 面板地址",
+    "type": "string",
+    "default": "http://localhost:23333",
+    "hint": "例如 http://your-panel:23333"
+  },
+  "mcsm_api_key": {
+    "description": "MCSM 面板 API Key（面板设置 → API 接口）",
+    "type": "string",
+    "default": ""
+  },
+  "mcsm_instance_uuid": {
+    "description": "MCSM 实例 UUID（实例设置页面 URL 中可见）",
+    "type": "string",
+    "default": ""
+  },
+  "mcsm_daemon_uuid": {
+    "description": "MCSM 守护进程 UUID（节点管理页面可见）",
+    "type": "string",
+    "default": ""
+  }
+}
