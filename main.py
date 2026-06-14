@@ -1254,7 +1254,7 @@ class MyPlugin(Star):
         try:
             import base64
             b64 = base64.b64encode(img_bytes).decode()
-            chain = MessageChain().image_base64(b64)
+            chain = MessageChain().base64_image(b64)
             yield event.chain_result(chain)
         except Exception as e:
             logger.warning(f"发送签到日历图片失败: {e}")
@@ -1291,7 +1291,7 @@ class MyPlugin(Star):
             streak = self._sign_consecutive_days(qqid)
             lines = [
                 "═══ 补签 ═══",
-                f"基础费用：{cost} 铜钱/天（越早越贵）",
+                f"补签费用： 基础费用{cost} × 2^(天数-1) /天",
                 f"当前连续签到：{streak} 天",
                 "",
                 f"可补签日期（{len(missed)} 天）：",
