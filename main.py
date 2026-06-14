@@ -94,27 +94,99 @@ def strip_mc_color(text: str) -> str:
     return re.sub(r"§.", "", text)
 
 
-def _get_sign_cal_font(size: int):
-    """获取支持中文的字体，优先系统字体，兜底默认字体。"""
+_SIGN_CAL_FONT_CACHE: dict[int, "ImageFont.FreeTypeFont | ImageFont.ImageFont"] = {}
+
+
+def _search_system_cjk_font() -> str | None:
+    """在系统字体目录中搜索支持中文的 TTF/TTC 字体，返回路径或 None。"""
+    search_dirs = [
+        "/usr/share/fonts",
+        "/usr/local/share/fonts",
+        "/usr/local/share/fonts/truetype",
+        "C:/Windows/Fonts",
+        "/System/Library/Fonts",
+        "/Library/Fonts",
+    ]
+    preferred = [
+        "NotoSansCJK", "NotoSansSC", "WenQuanYi", "wqy",
+        "SourceHanSans", "DroidSansFallback", "SimHei", "msyh",
+        "PingFang", "Hiragino",
+    ]
+    for d in search_dirs:
+        if not os.path.isdir(d):
+            continue
+        for root, _, files in os.walk(d):
+            for name in files:
+                low = name.lower()
+                if not (low.endswith(".ttf") or low.endswith(".ttc") or low.endswith(".otf")):
+                    continue
+                if not any(kw.lower() in low for kw in preferred):
+                    continue
+                fp = os.path.join(root, name)
+                try:
+                    ImageFont.truetype(fp, 12)
+                    return fp
+                except Exception:
+                    continue
+    return None
+
+
+def _download_cjk_font(cache_dir: str) -> str | None:
+    """下载 CJK 字体到缓存目录，返回路径或 None。"""
+    font_path = os.path.join(cache_dir, "NotoSansSC-Regular.ttf")
+    if os.path.isfile(font_path):
+        return font_path
+    import urllib.request
+    sources = [
+        "https://cdn.jsdelivr.net/gh/AstraThreshold/fonts-cjk/NotoSansSC-Regular.otf",
+        "https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/OTF/SimplifiedChinese/NotoSansSC-Regular.otf",
+    ]
+    for url in sources:
+        try:
+            os.makedirs(cache_dir, exist_ok=True)
+            urllib.request.urlretrieve(url, font_path)
+            if os.path.getsize(font_path) > 100_000:
+                return font_path
+            os.remove(font_path)
+        except Exception:
+            if os.path.isfile(font_path):
+                try:
+                    os.remove(font_path)
+                except OSError:
+                    pass
+    return None
+
+
+def _get_sign_cal_font(size: int, font_cache_dir: str = ""):
+    """获取支持中文的字体：系统搜索 → 自动下载 → 默认字体（ASCII only）。"""
     if not _HAS_PIL:
         return None
-    candidates = [
-        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "C:/Windows/Fonts/msyh.ttc",
-        "C:/Windows/Fonts/simhei.ttf",
-        "C:/Windows/Fonts/simsun.ttc",
-    ]
-    for fp in candidates:
-        if os.path.isfile(fp):
+    if size in _SIGN_CAL_FONT_CACHE:
+        return _SIGN_CAL_FONT_CACHE[size]
+    # 1) 系统字体
+    sys_font = _search_system_cjk_font()
+    if sys_font:
+        try:
+            f = ImageFont.truetype(sys_font, size)
+            _SIGN_CAL_FONT_CACHE[size] = f
+            return f
+        except Exception:
+            pass
+    # 2) 自动下载
+    if font_cache_dir:
+        dl_path = _download_cjk_font(font_cache_dir)
+        if dl_path:
             try:
-                return ImageFont.truetype(fp, size)
+                f = ImageFont.truetype(dl_path, size)
+                _SIGN_CAL_FONT_CACHE[size] = f
+                return f
             except Exception:
-                continue
-    return ImageFont.load_default()
+                pass
+    # 3) 兜底
+    logger.warning("[mcsigncal] 未找到 CJK 字体，日历中文将显示为方框。请安装字体或在 Docker 中运行: apt install fonts-noto-cjk")
+    f = ImageFont.load_default()
+    _SIGN_CAL_FONT_CACHE[size] = f
+    return f
 
 
 async def mc_server_list_ping(host: str, port: int, timeout: float = 3.0) -> dict:
@@ -231,6 +303,7 @@ class MyPlugin(Star):
         self.sign_money_command = str(self.config.get("sign_money_command", "d money add {name} {amount}"))
         self.money_command_prefix = str(self.config.get("money_command_prefix", "d money"))
         self.sign_backfill_cost_per_day = int(self.config.get("sign_backfill_cost_per_day", 50))
+        self.sign_cal_font_cache_dir = os.path.join(self.plugin_data_dir, "fonts")
         self.sign_file = os.path.join(self.plugin_data_dir, "sign_data.json")
         self.sign_data = self._load_sign_data()
         self.transfer_log_file = os.path.join(self.plugin_data_dir, "transfer_log.jsonl")
@@ -372,9 +445,9 @@ class MyPlugin(Star):
                 signed_days.add(d)
 
         # 字体
-        font = _get_sign_cal_font(14)
-        font_title = _get_sign_cal_font(24)
-        font_day = _get_sign_cal_font(20)
+        font = _get_sign_cal_font(14, self.sign_cal_font_cache_dir)
+        font_title = _get_sign_cal_font(24, self.sign_cal_font_cache_dir)
+        font_day = _get_sign_cal_font(20, self.sign_cal_font_cache_dir)
 
         cell_w, cell_h = 64, 56
         cols = 7
