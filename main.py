@@ -492,18 +492,13 @@ class MyPlugin(Star):
 
     @staticmethod
     def _sign_bonus_multiplier(streak: int) -> tuple[float, str]:
-        """连续签到加成倍率，返回 (倍率, 描述文字)。"""
-        tiers = [
-            (10, 2.5, "+150%"),
-            (7,  2.0, "+100%"),
-            (5,  1.5, "+50%"),
-            (3,  1.2, "+20%"),
-            (2,  1.1, "+10%"),
-        ]
-        for min_days, mult, desc in tiers:
-            if streak >= min_days:
-                return mult, desc
-        return 1.0, ""
+        """连续签到加成：每天 +1%，100 天封顶（2.0x）。返回 (倍率, 描述文字)。"""
+        if streak <= 1:
+            return 1.0, ""
+        days = min(streak, 100)
+        pct = days - 1  # 第2天开始 +1%
+        mult = 1.0 + pct / 100.0
+        return mult, f"+{pct}%"
 
     @staticmethod
     def _generate_fortune(qqid: str, date_str: str) -> dict:
