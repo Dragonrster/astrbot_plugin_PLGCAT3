@@ -102,16 +102,17 @@ def _search_system_cjk_font() -> str | None:
     search_dirs = [
         "/usr/share/fonts",
         "/usr/local/share/fonts",
-        "/usr/local/share/fonts/truetype",
         "C:/Windows/Fonts",
         "/System/Library/Fonts",
         "/Library/Fonts",
     ]
+    # 优先级：完整 CJK 字体排在前面
     preferred = [
-        "NotoSansCJK", "NotoSansSC", "WenQuanYi", "wqy",
-        "SourceHanSans", "DroidSansFallback", "SimHei", "msyh",
-        "PingFang", "Hiragino",
+        "notosanscjk", "notosanssc", "sourcehansans",
+        "wenquanyi", "wqy", "droidsansfallback",
+        "simhei", "msyh", "pingfang", "hiragino",
     ]
+    candidates: list[tuple[int, str]] = []
     for d in search_dirs:
         if not os.path.isdir(d):
             continue
@@ -120,14 +121,18 @@ def _search_system_cjk_font() -> str | None:
                 low = name.lower()
                 if not (low.endswith(".ttf") or low.endswith(".ttc") or low.endswith(".otf")):
                     continue
-                if not any(kw.lower() in low for kw in preferred):
-                    continue
-                fp = os.path.join(root, name)
-                try:
-                    ImageFont.truetype(fp, 12)
-                    return fp
-                except Exception:
-                    continue
+                for idx, kw in enumerate(preferred):
+                    if kw in low:
+                        candidates.append((idx, os.path.join(root, name)))
+                        break
+    # 按优先级排序
+    candidates.sort(key=lambda x: x[0])
+    for _, fp in candidates:
+        try:
+            ImageFont.truetype(fp, 12)
+            return fp
+        except Exception:
+            continue
     return None
 
 
@@ -157,18 +162,28 @@ def _download_cjk_font(cache_dir: str) -> str | None:
     return None
 
 
-def _get_sign_cal_font(size: int, font_cache_dir: str = ""):
-    """获取支持中文的字体：系统搜索 → 自动下载 → 默认字体（ASCII only）。"""
+def _get_sign_cal_font(size: int, font_cache_dir: str = "", custom_font_path: str = ""):
+    """获取支持中文的字体：自定义路径 → 系统搜索 → 自动下载 → 默认字体。"""
     if not _HAS_PIL:
         return None
     if size in _SIGN_CAL_FONT_CACHE:
         return _SIGN_CAL_FONT_CACHE[size]
+    # 0) 用户自定义字体路径
+    if custom_font_path and os.path.isfile(custom_font_path):
+        try:
+            f = ImageFont.truetype(custom_font_path, size)
+            _SIGN_CAL_FONT_CACHE[size] = f
+            logger.info(f"[mcsigncal] 使用自定义字体: {custom_font_path}")
+            return f
+        except Exception as e:
+            logger.warning(f"[mcsigncal] 自定义字体加载失败: {custom_font_path} → {e}")
     # 1) 系统字体
     sys_font = _search_system_cjk_font()
     if sys_font:
         try:
             f = ImageFont.truetype(sys_font, size)
             _SIGN_CAL_FONT_CACHE[size] = f
+            logger.info(f"[mcsigncal] 使用系统字体: {sys_font}")
             return f
         except Exception:
             pass
@@ -179,11 +194,13 @@ def _get_sign_cal_font(size: int, font_cache_dir: str = ""):
             try:
                 f = ImageFont.truetype(dl_path, size)
                 _SIGN_CAL_FONT_CACHE[size] = f
+                logger.info(f"[mcsigncal] 使用下载字体: {dl_path}")
                 return f
             except Exception:
                 pass
     # 3) 兜底
-    logger.warning("[mcsigncal] 未找到 CJK 字体，日历中文将显示为方框。请安装字体或在 Docker 中运行: apt install fonts-noto-cjk")
+    logger.warning("[mcsigncal] 未找到 CJK 字体，日历中文将显示为方框。"
+                   "请安装字体包（apt install fonts-noto-cjk）或在插件配置 sign_cal_font_path 中指定字体文件路径。")
     f = ImageFont.load_default()
     _SIGN_CAL_FONT_CACHE[size] = f
     return f
@@ -303,6 +320,7 @@ class MyPlugin(Star):
         self.sign_money_command = str(self.config.get("sign_money_command", "d money add {name} {amount}"))
         self.money_command_prefix = str(self.config.get("money_command_prefix", "d money"))
         self.sign_backfill_cost_per_day = int(self.config.get("sign_backfill_cost_per_day", 50))
+        self.sign_cal_font_path = str(self.config.get("sign_cal_font_path", "") or "").strip()
         self.sign_cal_font_cache_dir = os.path.join(self.plugin_data_dir, "fonts")
         self.sign_file = os.path.join(self.plugin_data_dir, "sign_data.json")
         self.sign_data = self._load_sign_data()
@@ -412,19 +430,37 @@ class MyPlugin(Star):
             json.dump(self.sign_data, f, ensure_ascii=False, indent=2)
 
     def _sign_consecutive_days(self, qqid: str) -> int:
-        """计算用户连续签到天数（从今天往回数）"""
+        """计算当前连续签到天数（从今天往回数，含补签）"""
         today = datetime.now().date()
         streak = 0
         d = today
         while True:
             ds = d.strftime("%Y-%m-%d")
-            signers = self.sign_data.get(ds, [])
-            if qqid in signers:
+            if qqid in self.sign_data.get(ds, []):
                 streak += 1
                 d -= timedelta(days=1)
             else:
                 break
         return streak
+
+    def _sign_max_consecutive_days(self, qqid: str) -> int:
+        """计算历史最高连续签到天数（遍历所有签到记录，含补签）"""
+        signed = sorted(
+            ds for ds, signers in self.sign_data.items() if qqid in signers
+        )
+        if not signed:
+            return 0
+        max_streak = 1
+        cur_streak = 1
+        for i in range(1, len(signed)):
+            prev = datetime.strptime(signed[i - 1], "%Y-%m-%d").date()
+            cur = datetime.strptime(signed[i], "%Y-%m-%d").date()
+            if (cur - prev).days == 1:
+                cur_streak += 1
+            else:
+                max_streak = max(max_streak, cur_streak)
+                cur_streak = 1
+        return max(max_streak, cur_streak)
 
     def _generate_sign_calendar(self, qqid: str, user_name: str, year: int = None, month: int = None) -> bytes | None:
         """生成签到日历图片，返回 PNG bytes。需要 Pillow。"""
@@ -466,7 +502,7 @@ class MyPlugin(Star):
         draw.text((pad_x, pad_y), title, fill="#333333", font=font_title)
 
         # 副标题
-        sub = f"{user_name}  |  本月签到 {len(signed_days)}/{total_days_in_month} 天  |  连续 {self._sign_consecutive_days(qqid)} 天"
+        sub = f"{user_name}  |  本月签到 {len(signed_days)}/{total_days_in_month} 天  |  连续 {self._sign_consecutive_days(qqid)} 天  |  最高 {self._sign_max_consecutive_days(qqid)} 天"
         draw.text((pad_x, pad_y + 30), sub, fill="#666666", font=font)
 
         # 星期头
@@ -1224,6 +1260,7 @@ class MyPlugin(Star):
         yesterday_signers = self.sign_data.get(yesterday, [])
         yesterday_count = len(yesterday_signers)
         streak = self._sign_consecutive_days(qqid)
+        max_streak = self._sign_max_consecutive_days(qqid)
         if yesterday_count > 0:
             pool = random.randint(self.sign_money_min, self.sign_money_max)
             reward = pool // yesterday_count
@@ -1237,17 +1274,17 @@ class MyPlugin(Star):
                 yield event.plain_result(
                     f"签到成功！{mcname} +{reward} 铜钱\n"
                     f"奖池 {pool} / 昨日 {yesterday_count} 人 = 每人 {reward}\n"
-                    f"今日已签到 {today_count} 人  |  连续签到 {streak} 天"
+                    f"今日已签到 {today_count} 人  |  连续 {streak} 天  |  最高 {max_streak} 天"
                 )
             else:
                 yield event.plain_result(
                     f"签到成功！昨日 {yesterday_count} 人签到，奖池不足以平分\n"
-                    f"今日已签到 {today_count} 人  |  连续签到 {streak} 天"
+                    f"今日已签到 {today_count} 人  |  连续 {streak} 天  |  最高 {max_streak} 天"
                 )
         else:
             yield event.plain_result(
                 f"签到成功！昨日无人签到，今日无奖励\n"
-                f"今日已签到 {today_count} 人  |  连续签到 {streak} 天"
+                f"今日已签到 {today_count} 人  |  连续 {streak} 天  |  最高 {max_streak} 天"
             )
 
     @filter.command("mcsignreset", desc="重置签到记录（管理员）", alias={"mcsignr"})
@@ -1309,7 +1346,8 @@ class MyPlugin(Star):
                 if qqid in self.sign_data.get(ds, []):
                     signed.append(d)
             streak = self._sign_consecutive_days(qqid)
-            lines = [f"📅 {y} 年 {m} 月签到日历（{user_name}）", f"签到 {len(signed)}/{total} 天  |  连续 {streak} 天", ""]
+            max_streak = self._sign_max_consecutive_days(qqid)
+            lines = [f"📅 {y} 年 {m} 月签到日历（{user_name}）", f"签到 {len(signed)}/{total} 天  |  连续 {streak} 天  |  最高 {max_streak} 天", ""]
             week = "日 一 二 三 四 五 六"
             lines.append(week)
             first_weekday, _ = calendar.monthrange(y, m)
@@ -1362,10 +1400,11 @@ class MyPlugin(Star):
                 yield event.plain_result("本月至今没有漏签，太棒了！")
                 return
             streak = self._sign_consecutive_days(qqid)
+            max_streak = self._sign_max_consecutive_days(qqid)
             lines = [
                 "═══ 补签 ═══",
                 f"补签费用： 基础费用{cost} × 2^(天数-1) /天",
-                f"当前连续签到：{streak} 天",
+                f"当前连续 {streak} 天  |  最高 {max_streak} 天",
                 "",
                 f"可补签日期（{len(missed)} 天）：",
             ]
@@ -1455,11 +1494,12 @@ class MyPlugin(Star):
         self.sign_data[ds] = signers
         self._save_sign_data()
         streak = self._sign_consecutive_days(qqid)
+        max_streak = self._sign_max_consecutive_days(qqid)
         net = reward - cost
         yield event.plain_result(
             f"补签成功！{ds} 已记录签到\n"
             f"扣款 -{cost} 铜钱  |  奖励 +{reward} 铜钱  |  净变动 {net:+d}\n"
-            f"当前连续签到 {streak} 天"
+            f"连续 {streak} 天  |  最高 {max_streak} 天"
         )
 
     @filter.command("mcmoney", desc="查询铜钱余额", alias={"mcqian", "mcq"})
