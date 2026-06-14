@@ -533,76 +533,7 @@ class MyPlugin(Star):
         weights = [10, 20, 25, 25, 15, 5]
         level = rng.choices(levels, weights=weights, k=1)[0]
         colors = [
-            "赤",
-            "朱",
-            "丹",
-            "绛",
-            "绯",
-            "炎",
-            "彤",
-            "赭赤",  # 红色类
-            "橘黄",
-            "杏黄",
-            "琥珀",
-            "橙黄",
-            "金驼",
-            "蜜色",  # 橙色类
-            "黄",
-            "金",
-            "缃",
-            "栀",
-            "葵黄",
-            "秋香",
-            "鹅黄",
-            "藤黄",
-            "绿",
-            "碧",
-            "翠",
-            "青葱",
-            "竹青",
-            "松柏绿",
-            "艾绿",
-            "石绿",
-            "蓝",
-            "青",
-            "黛",
-            "苍",
-            "靛蓝",
-            "鸦青",
-            "月白",
-            "天青",
-            "紫",
-            "紫棠",
-            "丁香",
-            "藕荷",
-            "青莲",
-            "紫罗",
-            "紫藤",
-            "紫灰",
-            "白",
-            "素",
-            "皓",
-            "雪",
-            "霜色",
-            "银白",
-            "月白",
-            "荼白",
-            "粉",
-            "绯",
-            "桃",
-            "胭脂",
-            "水红",
-            "粉黛",
-            "杨妃色",
-            "十样锦",
-            "金",
-            "赤金",
-            "鎏金",
-            "黄白",
-            "金箔色",
-            "耀金",
-            "秋金色",
-            "金粟",
+            "赤", "朱","丹","绛","绯","炎","彤","赭赤","橘黄","杏黄","琥珀","橙黄","金驼","蜜色","黄","金","缃","栀","葵黄","秋香","鹅黄","藤黄","绿","碧","翠","青葱","竹青","松柏绿","艾绿","石绿","蓝","青","黛","苍","靛蓝","鸦青","月白","天青","紫","紫棠","丁香","藕荷","青莲","紫罗","紫藤","紫灰","白","素","皓","雪","霜色","银白","月白","荼白","粉","绯","桃","胭脂","水红","粉黛","杨妃色","十样锦","金","赤金","鎏金","黄白","金箔色","耀金","秋金色","金粟",
         ]
         lucky_color = rng.choice(colors)
         lucky_num = rng.randint(1, 99)
@@ -681,7 +612,7 @@ class MyPlugin(Star):
         self, user_name: str, mcname: str | None, reward: int, pool: int,
         yesterday_count: int, today_count: int, streak: int, max_streak: int,
         fortune: dict, no_reward_reason: str = "",
-        base_reward: int = 0, bonus_desc: str = "",
+        base_reward: int = 0, bonus_desc: str = "", total_days: int = 0,
     ) -> bytes | None:
         """生成签到结果卡片图片，返回 PNG bytes。"""
         if not _HAS_PIL:
@@ -728,11 +659,12 @@ class MyPlugin(Star):
         bonus_pct = bonus_desc if bonus_desc else "无"
         stats = [
             ("今日签到", f"{today_count} 人"),
+            ("累计签到", f"{total_days} 天"),
             ("连续签到", f"{streak} 天"),
             ("最高记录", f"{max_streak} 天"),
             ("当前加成", bonus_pct),
         ]
-        col_w = (w - 40) // 4
+        col_w = (w - 40) // 5
         for i, (label, val) in enumerate(stats):
             cx = 20 + i * col_w
             draw.rectangle([cx, y, cx + col_w - 6, y + 55], fill="#F5F5F5", outline="#E0E0E0", width=1)
@@ -1568,6 +1500,7 @@ class MyPlugin(Star):
         max_streak = self._sign_max_consecutive_days(qqid)
         fortune = self._generate_fortune(qqid, today)
 
+        total_days = self._get_total_sign_days(qqid)
         bonus_mult, bonus_desc = self._sign_bonus_multiplier(streak)
         reward = 0
         base_reward = 0
@@ -1595,7 +1528,7 @@ class MyPlugin(Star):
         img_bytes = self._generate_sign_card(
             user_name, mcname, reward, pool, yesterday_count,
             today_count, streak, max_streak, fortune, no_reward_reason,
-            base_reward, bonus_desc,
+            base_reward, bonus_desc, total_days,
         )
         if img_bytes:
             try:
@@ -1614,7 +1547,7 @@ class MyPlugin(Star):
         if reward > 0:
             bonus_info = f"  连续加成 {bonus_desc}（基础 {base_reward}）" if bonus_desc else ""
             lines[0] = f"签到成功！{mcname} +{reward} 铜钱（奖池 {pool} / {yesterday_count} 人{bonus_info}）"
-        lines.append(f"今日已签到 {today_count} 人  |  连续 {streak} 天  |  最高 {max_streak} 天")
+        lines.append(f"今日 {today_count} 人  |  累计 {total_days} 天  |  连续 {streak} 天  |  最高 {max_streak} 天")
         lines.append(f"今日占卜：{fortune['level']}  幸运色 {fortune['color']}  幸运数字 {fortune['number']}")
         lines.append(f"签文：{fortune['message']}")
         yield event.plain_result("\n".join(lines))
