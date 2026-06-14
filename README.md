@@ -64,6 +64,7 @@
 | `sign_money_min` / `sign_money_max` | 签到随机铜钱范围 | `10` / `100` |
 | `sign_money_command` | 加钱 RCON 命令模板（`{name}`、`{amount}` 会被替换） | `d money add {name} {amount}` |
 | `money_command_prefix` | 余额查询命令前缀 | `d money` |
+| `sign_backfill_cost_per_day` | 补签基础费用（越早越贵：第N天前 = 基础 × 2^(N-1)） | `50` |
 
 ## 命令列表
 
@@ -112,6 +113,8 @@
 | 命令 | 说明 |
 |------|------|
 | `/mcsign` | 每日签到领铜钱（mcqd） |
+| `/mcsigncal` | 查看签到日历图片（mcsigncalendar） |
+| `/mcsignback [日期]` | 补签，花铜钱补往日签到（mcbq） |
 | `/mcmoney` | 查询铜钱余额（mcqian） |
 | `/mctransfer <MC名> <数量>` | 转账（mczz） |
 

@@ -124,6 +124,12 @@
     "default": "d money",
     "hint": "查询时拼接为: {prefix} get {name}"
   },
+  "sign_backfill_cost_per_day": {
+    "description": "补签每天基础费用（铜钱），越早的日期越贵：第N天前 = 基础费用 × 2^(N-1)",
+    "type": "int",
+    "default": 50,
+    "hint": "例如 50：昨天补签 50，前天补签 100，大前天 200..."
+  },
   "mcsm_panel_url": {
     "description": "MCSM 面板地址",
     "type": "string",

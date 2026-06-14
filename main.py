@@ -1,4 +1,5 @@
 import asyncio
+import calendar
 import json
 import random
 import struct
@@ -6,6 +7,13 @@ import os
 import re
 import time
 from collections import defaultdict, deque
+from datetime import datetime, timedelta
+
+try:
+    from PIL import Image, ImageDraw, ImageFont
+    _HAS_PIL = True
+except ImportError:
+    _HAS_PIL = False
 
 from astrbot.api.event import filter, AstrMessageEvent
 
@@ -84,6 +92,29 @@ class AsyncRcon:  # 异步RCON类
 
 def strip_mc_color(text: str) -> str:
     return re.sub(r"§.", "", text)
+
+
+def _get_sign_cal_font(size: int):
+    """获取支持中文的字体，优先系统字体，兜底默认字体。"""
+    if not _HAS_PIL:
+        return None
+    candidates = [
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "C:/Windows/Fonts/msyh.ttc",
+        "C:/Windows/Fonts/simhei.ttf",
+        "C:/Windows/Fonts/simsun.ttc",
+    ]
+    for fp in candidates:
+        if os.path.isfile(fp):
+            try:
+                return ImageFont.truetype(fp, size)
+            except Exception:
+                continue
+    return ImageFont.load_default()
 
 
 async def mc_server_list_ping(host: str, port: int, timeout: float = 3.0) -> dict:
@@ -199,6 +230,7 @@ class MyPlugin(Star):
         self.sign_money_max = int(self.config.get("sign_money_max", 100))
         self.sign_money_command = str(self.config.get("sign_money_command", "d money add {name} {amount}"))
         self.money_command_prefix = str(self.config.get("money_command_prefix", "d money"))
+        self.sign_backfill_cost_per_day = int(self.config.get("sign_backfill_cost_per_day", 50))
         self.sign_file = os.path.join(self.plugin_data_dir, "sign_data.json")
         self.sign_data = self._load_sign_data()
         self.transfer_log_file = os.path.join(self.plugin_data_dir, "transfer_log.jsonl")
@@ -306,7 +338,118 @@ class MyPlugin(Star):
         with open(self.sign_file, "w", encoding="utf-8") as f:
             json.dump(self.sign_data, f, ensure_ascii=False, indent=2)
 
-    def _log_transfer(self, sender_qq: str, sender_mc: str, receiver_qq: str, receiver_mc: str, amount: int, balance_after: int | None):
+    def _sign_consecutive_days(self, qqid: str) -> int:
+        """计算用户连续签到天数（从今天往回数）"""
+        today = datetime.now().date()
+        streak = 0
+        d = today
+        while True:
+            ds = d.strftime("%Y-%m-%d")
+            signers = self.sign_data.get(ds, [])
+            if qqid in signers:
+                streak += 1
+                d -= timedelta(days=1)
+            else:
+                break
+        return streak
+
+    def _generate_sign_calendar(self, qqid: str, user_name: str, year: int = None, month: int = None) -> bytes | None:
+        """生成签到日历图片，返回 PNG bytes。需要 Pillow。"""
+        if not _HAS_PIL:
+            return None
+        now = datetime.now()
+        year = year or now.year
+        month = month or now.month
+        today_day = now.day if (year == now.year and month == now.month) else -1
+
+        # 统计本月签到天数
+        cal = calendar.monthcalendar(year, month)
+        total_days_in_month = calendar.monthrange(year, month)[1]
+        signed_days = set()
+        for d in range(1, total_days_in_month + 1):
+            ds = f"{year}-{month:02d}-{d:02d}"
+            if qqid in self.sign_data.get(ds, []):
+                signed_days.add(d)
+
+        # 字体
+        font = _get_sign_cal_font(14)
+        font_title = _get_sign_cal_font(24)
+        font_day = _get_sign_cal_font(20)
+
+        cell_w, cell_h = 64, 56
+        cols = 7
+        rows = len(cal)
+        header_h = 60
+        legend_h = 30
+        pad_x, pad_y = 20, 10
+        img_w = pad_x * 2 + cell_w * cols
+        img_h = pad_y * 2 + header_h + 30 + cell_h * rows + legend_h
+
+        img = Image.new("RGB", (img_w, img_h), "#FFFFFF")
+        draw = ImageDraw.Draw(img)
+
+        # 标题
+        title = f"{year} 年 {month} 月  签到日历"
+        draw.text((pad_x, pad_y), title, fill="#333333", font=font_title)
+
+        # 副标题
+        sub = f"{user_name}  |  本月签到 {len(signed_days)}/{total_days_in_month} 天  |  连续 {self._sign_consecutive_days(qqid)} 天"
+        draw.text((pad_x, pad_y + 30), sub, fill="#666666", font=font)
+
+        # 星期头
+        week_names = ["一", "二", "三", "四", "五", "六", "日"]
+        week_colors = ["#333333"] * 5 + ["#4A90D9"] * 2
+        y_start = pad_y + header_h
+        for col, (name, color) in enumerate(zip(week_names, week_colors)):
+            x = pad_x + col * cell_w + cell_w // 2 - 6
+            draw.text((x, y_start), name, fill=color, font=font_day)
+
+        # 日历格子
+        grid_top = y_start + 30
+        for row_idx, week in enumerate(cal):
+            for col_idx, day in enumerate(week):
+                x = pad_x + col_idx * cell_w
+                y = grid_top + row_idx * cell_h
+                if day == 0:
+                    continue
+                # 背景色
+                if day in signed_days:
+                    bg = "#E8F5E9"
+                    border = "#4CAF50"
+                    text_fill = "#2E7D32"
+                elif day == today_day:
+                    bg = "#FFF8E1"
+                    border = "#FF9800"
+                    text_fill = "#E65100"
+                else:
+                    bg = "#F8F9FA"
+                    border = "#E0E0E0"
+                    text_fill = "#999999"
+                draw.rectangle([x + 1, y + 1, x + cell_w - 2, y + cell_h - 2], fill=bg, outline=border, width=2)
+                # 日期数字
+                day_str = str(day)
+                bbox = draw.textbbox((0, 0), day_str, font=font_day)
+                tw = bbox[2] - bbox[0]
+                th = bbox[3] - bbox[1]
+                draw.text((x + cell_w // 2 - tw // 2, y + 8), day_str, fill=text_fill, font=font_day)
+                # 签到勾号
+                if day in signed_days:
+                    check = "✓"
+                    draw.text((x + cell_w // 2 - 5, y + cell_h - 18), check, fill="#4CAF50", font=font)
+
+        # 图例
+        ly = grid_top + rows * cell_h + 6
+        draw.rectangle([pad_x, ly, pad_x + 14, ly + 14], fill="#E8F5E9", outline="#4CAF50")
+        draw.text((pad_x + 18, ly - 1), "已签到", fill="#333333", font=font)
+        draw.rectangle([pad_x + 80, ly, pad_x + 94, ly + 14], fill="#FFF8E1", outline="#FF9800")
+        draw.text((pad_x + 98, ly - 1), "今日", fill="#333333", font=font)
+        draw.rectangle([pad_x + 146, ly, pad_x + 160, ly + 14], fill="#F8F9FA", outline="#E0E0E0")
+        draw.text((pad_x + 164, ly - 1), "未签到", fill="#999999", font=font)
+
+        import io
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        return buf.getvalue()
         record = {
             "time": time.strftime("%Y-%m-%d %H:%M:%S"),
             "sender_qq": sender_qq,
@@ -720,6 +863,8 @@ class MyPlugin(Star):
                 "",
                 "【经济】",
                 f"  /mcsign  每日签到（{sign}，mcqd）",
+                "  /mcsigncal  签到日历（mcsigncalendar）",
+                "  /mcsignback [日期]  补签（mcbq）",
                 "  /mcmoney  查询铜钱（mcqian）",
                 "  /mctransfer <MC名> <数量>  转账（mczz）",
                 "",
@@ -1005,6 +1150,7 @@ class MyPlugin(Star):
         today_count = len(today_signers)
         yesterday_signers = self.sign_data.get(yesterday, [])
         yesterday_count = len(yesterday_signers)
+        streak = self._sign_consecutive_days(qqid)
         if yesterday_count > 0:
             pool = random.randint(self.sign_money_min, self.sign_money_max)
             reward = pool // yesterday_count
@@ -1018,17 +1164,17 @@ class MyPlugin(Star):
                 yield event.plain_result(
                     f"签到成功！{mcname} +{reward} 铜钱\n"
                     f"奖池 {pool} / 昨日 {yesterday_count} 人 = 每人 {reward}\n"
-                    f"今日已签到 {today_count} 人"
+                    f"今日已签到 {today_count} 人  |  连续签到 {streak} 天"
                 )
             else:
                 yield event.plain_result(
                     f"签到成功！昨日 {yesterday_count} 人签到，奖池不足以平分\n"
-                    f"今日已签到 {today_count} 人"
+                    f"今日已签到 {today_count} 人  |  连续签到 {streak} 天"
                 )
         else:
             yield event.plain_result(
                 f"签到成功！昨日无人签到，今日无奖励\n"
-                f"今日已签到 {today_count} 人"
+                f"今日已签到 {today_count} 人  |  连续签到 {streak} 天"
             )
 
     @filter.command("mcsignreset", desc="重置签到记录（管理员）", alias={"mcsignr"})
@@ -1055,6 +1201,193 @@ class MyPlugin(Star):
                 yield event.plain_result(f"已从 {removed} 天的签到记录中移除 QQ {target}。")
             else:
                 yield event.plain_result(f"QQ {target} 没有签到记录。")
+
+    @filter.command("mcsigncal", desc="查看签到日历", alias={"mcsigncalendar", "mcqc"})
+    async def mcsigncal(self, event: AstrMessageEvent):
+        if not self.enable_sign:
+            yield event.plain_result("抱歉，签到功能未开启。")
+            return
+        qqid = str(event.get_sender_id())
+        bound = self.apply_data.get(qqid, [])
+        if not bound:
+            yield event.plain_result("你还没有绑定MC账号，请先使用 /wantwl <MC名> 绑定。")
+            return
+        user_name = bound[0]
+        # 支持查看指定月份：/mcsigncal 2026-06
+        raw = self._tail_after_command_names(event, "mcsigncal", "mcsigncalendar", "mcqc")
+        year, month = None, None
+        if raw:
+            m = re.match(r"^(\d{4})-(\d{1,2})$", raw.strip())
+            if m:
+                year, month = int(m.group(1)), int(m.group(2))
+                if not (1 <= month <= 12):
+                    yield event.plain_result("月份无效，请用格式 /mcsigncal 2026-06")
+                    return
+        img_bytes = self._generate_sign_calendar(qqid, user_name, year, month)
+        if img_bytes is None:
+            # 无 Pillow，退化为文本日历
+            now = datetime.now()
+            y = year or now.year
+            m = month or now.month
+            total = calendar.monthrange(y, m)[1]
+            signed = []
+            for d in range(1, total + 1):
+                ds = f"{y}-{m:02d}-{d:02d}"
+                if qqid in self.sign_data.get(ds, []):
+                    signed.append(d)
+            streak = self._sign_consecutive_days(qqid)
+            lines = [f"📅 {y} 年 {m} 月签到日历（{user_name}）", f"签到 {len(signed)}/{total} 天  |  连续 {streak} 天", ""]
+            week = "日 一 二 三 四 五 六"
+            lines.append(week)
+            first_weekday, _ = calendar.monthrange(y, m)
+            row = "   " * first_weekday
+            for d in range(1, total + 1):
+                tag = f"{'✅' if d in signed else d:2}"
+                row += f"{tag} "
+                if (first_weekday + d) % 7 == 0:
+                    lines.append(row.rstrip())
+                    row = ""
+            if row.strip():
+                lines.append(row.rstrip())
+            yield event.plain_result("\n".join(lines))
+            return
+        try:
+            import base64
+            b64 = base64.b64encode(img_bytes).decode()
+            chain = MessageChain().image_base64(b64)
+            yield event.chain_result(chain)
+        except Exception as e:
+            logger.warning(f"发送签到日历图片失败: {e}")
+            yield event.plain_result(f"生成日历图片失败：{e}")
+
+    @filter.command("mcsignback", desc="补签（花铜钱补往日签到）", alias={"mcsignbackfill", "mcbq"})
+    async def mcsignback(self, event: AstrMessageEvent):
+        if not self.enable_sign:
+            yield event.plain_result("抱歉，签到功能未开启。")
+            return
+        qqid = str(event.get_sender_id())
+        bound = self.apply_data.get(qqid, [])
+        if not bound:
+            yield event.plain_result("你还没有绑定MC账号，请先使用 /wantwl <MC名> 绑定。")
+            return
+        mcname = bound[0]
+        # /mcsignback 2026-06-13  或  /mcsignback 13（默认本月）
+        raw = self._tail_after_command_names(event, "mcsignback", "mcsignbackfill", "mcbq")
+        if not raw.strip():
+            cost = self.sign_backfill_cost_per_day
+            # 列出本月可补签的日期
+            now = datetime.now()
+            year, month = now.year, now.month
+            total = calendar.monthrange(year, month)[1]
+            today_d = now.day
+            missed = []
+            for d in range(1, today_d):
+                ds = f"{year}-{month:02d}-{d:02d}"
+                if qqid not in self.sign_data.get(ds, []):
+                    missed.append(ds)
+            if not missed:
+                yield event.plain_result("本月至今没有漏签，太棒了！")
+                return
+            streak = self._sign_consecutive_days(qqid)
+            lines = [
+                "═══ 补签 ═══",
+                f"基础费用：{cost} 铜钱/天（越早越贵）",
+                f"当前连续签到：{streak} 天",
+                "",
+                f"可补签日期（{len(missed)} 天）：",
+            ]
+            for ds in missed:
+                d = int(ds.split("-")[2])
+                days_back = today_d - d
+                day_cost = cost * (2 ** (days_back - 1))
+                lines.append(f"  {ds}  费用 {day_cost} 铜钱")
+            lines.append("")
+            lines.append("用法：/mcsignback 2026-06-10 或 /mcsignback 10")
+            yield event.plain_result("\n".join(lines))
+            return
+        # 解析目标日期
+        target_str = raw.strip()
+        now = datetime.now()
+        m = re.match(r"^(\d{1,2})$", target_str)
+        if m:
+            day = int(m.group(1))
+            target_date = datetime(now.year, now.month, day).date()
+        else:
+            m2 = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})$", target_str)
+            if m2:
+                target_date = datetime(int(m2.group(1)), int(m2.group(2)), int(m2.group(3))).date()
+            else:
+                yield event.plain_result("日期格式错误，请用 /mcsignback 13 或 /mcsignback 2026-06-13")
+                return
+        today = now.date()
+        if target_date >= today:
+            yield event.plain_result("只能补签过去的日期。今天的签到请用 /mcsign")
+            return
+        if target_date.month != today.month or target_date.year != today.year:
+            yield event.plain_result("只能补签本月的日期。")
+            return
+        ds = target_date.strftime("%Y-%m-%d")
+        if qqid in self.sign_data.get(ds, []):
+            yield event.plain_result(f"{ds} 已经签过到了，不需要补签。")
+            return
+        days_back = (today - target_date).days
+        cost = self.sign_backfill_cost_per_day * (2 ** (days_back - 1))
+        # 查询余额
+        get_cmd = f"{self.money_command_prefix} get {mcname}"
+        try:
+            resp = await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, get_cmd)
+            resp_clean = strip_mc_color(resp).strip()
+            nums = re.findall(r"[-+]?\d+(?:\.\d+)?", resp_clean)
+            if not nums:
+                yield event.plain_result(f"无法解析铜钱余额：{resp_clean}")
+                return
+            balance = int(float(nums[-1]))
+        except Exception as e:
+            yield event.plain_result(f"查询余额失败：{e}")
+            return
+        if balance < cost:
+            yield event.plain_result(f"余额不足！补签 {ds} 需要 {cost} 铜钱，你当前有 {balance} 铜钱。")
+            return
+        # 扣款
+        sub_cmd = f"{self.money_command_prefix} sub {mcname} {cost}"
+        try:
+            await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, sub_cmd)
+        except Exception as e:
+            yield event.plain_result(f"扣款失败：{e}")
+            return
+        # 发放补签奖励
+        yesterday_count = len(self.sign_data.get(
+            (target_date + timedelta(days=1)).strftime("%Y-%m-%d"), []
+        ))
+        reward = 0
+        if yesterday_count > 0:
+            pool = random.randint(self.sign_money_min, self.sign_money_max)
+            reward = pool // yesterday_count
+            if reward > 0:
+                add_cmd = self.sign_money_command.replace("{name}", mcname).replace("{amount}", str(reward))
+                try:
+                    await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, add_cmd)
+                except Exception as e:
+                    # 奖励发放失败，回滚扣款
+                    rollback = f"{self.money_command_prefix} add {mcname} {cost}"
+                    try:
+                        await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, rollback)
+                    except Exception:
+                        pass
+                    yield event.plain_result(f"发放奖励失败，已回滚扣款：{e}")
+                    return
+        # 记录补签
+        signers = self.sign_data.get(ds, [])
+        signers.append(qqid)
+        self.sign_data[ds] = signers
+        self._save_sign_data()
+        streak = self._sign_consecutive_days(qqid)
+        net = reward - cost
+        yield event.plain_result(
+            f"补签成功！{ds} 已记录签到\n"
+            f"扣款 -{cost} 铜钱  |  奖励 +{reward} 铜钱  |  净变动 {net:+d}\n"
+            f"当前连续签到 {streak} 天"
+        )
 
     @filter.command("mcmoney", desc="查询铜钱余额", alias={"mcqian", "mcq"})
     async def mcmoney(self, event: AstrMessageEvent, mcname: str = ""):
