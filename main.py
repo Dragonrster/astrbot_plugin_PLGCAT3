@@ -2002,12 +2002,17 @@ class MyPlugin(Star):
                 if seg_type in ("at",) and seg_id:
                     receiver_qq = str(seg_id)
                     break
-        # 方法2：从文本 [At:XXXXX] 格式提取
+        # 方法2：从 昵称(QQ号) 格式提取（AstrBot 解析 @ 后的格式）
+        if not receiver_qq:
+            at_match = re.search(r"\((\d{5,})\)\s*$", receiver_input)
+            if at_match:
+                receiver_qq = at_match.group(1)
+        # 方法3：从文本 [At:XXXXX] 格式提取
         if not receiver_qq:
             at_match = re.match(r"^\[At:(\d+)\]$", receiver_input)
             if at_match:
                 receiver_qq = at_match.group(1)
-        # 方法3：纯数字 QQ 号
+        # 方法4：纯数字 QQ 号
         if not receiver_qq and receiver_input.isdigit():
             receiver_qq = receiver_input
         logger.info(f"[mctransfer] receiver_input={receiver_input} receiver_qq={receiver_qq}")
