@@ -577,13 +577,13 @@ class MyPlugin(Star):
             "中和",  # 平
             "小吉平",
             "微吉",
-            "平中带吉",
+            "平中吉",
             "浅喜",
             "平善",  # 平吉
-            "先凶后吉",
+            "凶后吉",
             "悔厉",
             "转机",
-            "危中有安",
+            "危转安",
             "凶化",  # 凶中带吉
         ]
         # 每组5项，按分类权重均分
@@ -2049,6 +2049,17 @@ class MyPlugin(Star):
         except Exception:
             pass
         self._log_transfer(qqid, sender_mc, "", receiver_mc, amount, new_balance)
+        # 游戏内私聊通知收款方
+        try:
+            notify_msg = json.dumps([
+                {"text": "你收到 ", "color": "white"},
+                {"text": sender_mc, "color": "gold"},
+                {"text": f" 的转账：{amount} 铜币", "color": "white"},
+            ], ensure_ascii=False)
+            notify_cmd = f"tellraw {receiver_mc} {notify_msg}"
+            await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, notify_cmd)
+        except Exception as e:
+            logger.warning(f"[mctransfer] 游戏内通知失败: {e}")
         yield event.plain_result(
             f"{sender_mc} → {receiver_mc}：{amount} 铜钱{new_balance_str}"
         )
