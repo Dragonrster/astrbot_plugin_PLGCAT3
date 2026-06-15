@@ -2052,9 +2052,10 @@ class MyPlugin(Star):
         # 游戏内私聊通知收款方
         try:
             notify_msg = json.dumps([
-                {"text": "你收到 ", "color": "white"},
+                {"text": "你收到 ", "color": "green"},
                 {"text": sender_mc, "color": "gold"},
-                {"text": f" 的转账：{amount} 铜币", "color": "white"},
+                {"text": " 的转账：", "color": "green"},
+                {"text": f"{amount} 铜币", "color": "gold"},
             ], ensure_ascii=False)
             notify_cmd = f"tellraw {receiver_mc} {notify_msg}"
             await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, notify_cmd)
