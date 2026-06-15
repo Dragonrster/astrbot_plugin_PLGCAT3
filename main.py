@@ -2079,6 +2079,17 @@ class MyPlugin(Star):
         if sender_mc == receiver_mc:
             yield event.plain_result("不能给自己转账。")
             return
+        # 验证收款方账户是否存在
+        receiver_get_cmd = f"{self.money_command_prefix} get {receiver_mc}"
+        try:
+            receiver_resp = await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, receiver_get_cmd)
+            receiver_resp_clean = strip_mc_color(receiver_resp).strip()
+            if not receiver_resp_clean or not re.findall(r"[-+]?\d+(?:\.\d+)?", receiver_resp_clean):
+                yield event.plain_result(f"收款方 {receiver_mc} 账户不存在或无法查询，转账已取消。")
+                return
+        except Exception as e:
+            yield event.plain_result(f"查询收款方账户失败：{e}，转账已取消。")
+            return
         # 查询发送方余额
         get_cmd = f"{self.money_command_prefix} get {sender_mc}"
         try:
