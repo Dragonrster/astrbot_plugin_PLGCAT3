@@ -1991,13 +1991,31 @@ class MyPlugin(Star):
         if amount <= 0:
             yield event.plain_result("金额必须大于 0。")
             return
-        # 解析收款方：优先 QQ 号 → 绑定的 MC 名，否则当 MC 名
-        if receiver_input.isdigit() and receiver_input in self.apply_data:
-            receiver_bound = self.apply_data[receiver_input]
-            if not receiver_bound:
+        # 解析收款方：尝试从消息链提取 @ 的 QQ 号
+        receiver_qq = ""
+        receiver_mc = ""
+        if hasattr(event, "message_obj") and hasattr(event.message_obj, "message"):
+            for seg in event.message_obj.message:
+                seg_type = getattr(seg, "type", None)
+                seg_id = getattr(seg, "qq", None) or getattr(seg, "id", None)
+                if str(seg_type) == "At" and seg_id:
+                    receiver_qq = str(seg_id)
+                    break
+        # 从 QQ 号解析 MC 名
+        if receiver_qq and receiver_qq in self.apply_data:
+            bound_list = self.apply_data[receiver_qq]
+            if bound_list:
+                receiver_mc = bound_list[0]
+            else:
+                yield event.plain_result(f"QQ {receiver_qq} 没有绑定MC账号。")
+                return
+        elif receiver_input.isdigit() and receiver_input in self.apply_data:
+            bound_list = self.apply_data[receiver_input]
+            if bound_list:
+                receiver_mc = bound_list[0]
+            else:
                 yield event.plain_result(f"QQ {receiver_input} 没有绑定MC账号。")
                 return
-            receiver_mc = receiver_bound[0]
         else:
             receiver_mc = receiver_input
         # 检查发送方绑定
