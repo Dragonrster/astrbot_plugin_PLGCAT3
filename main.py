@@ -1996,11 +1996,12 @@ class MyPlugin(Star):
         receiver_mc = ""
         if hasattr(event, "message_obj") and hasattr(event.message_obj, "message"):
             for seg in event.message_obj.message:
-                seg_type = getattr(seg, "type", None)
+                seg_type = str(getattr(seg, "type", "")).lower()
                 seg_id = getattr(seg, "qq", None) or getattr(seg, "id", None)
-                if str(seg_type) == "At" and seg_id:
+                if seg_type in ("at",) and seg_id:
                     receiver_qq = str(seg_id)
                     break
+        logger.info(f"[mctransfer] receiver_input={receiver_input} receiver_qq={receiver_qq} apply_data_keys={list(self.apply_data.keys())[:10]}")
         # 从 QQ 号解析 MC 名
         if receiver_qq and receiver_qq in self.apply_data:
             bound_list = self.apply_data[receiver_qq]
@@ -2018,6 +2019,7 @@ class MyPlugin(Star):
                 return
         else:
             receiver_mc = receiver_input
+        logger.info(f"[mctransfer] 最终 receiver_mc={receiver_mc}")
         # 检查发送方绑定
         sender_bound = self.apply_data.get(qqid, [])
         if not sender_bound:
