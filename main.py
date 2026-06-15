@@ -1028,7 +1028,7 @@ class MyPlugin(Star):
             self.apply_data[qqid].append(mcname)
             self._save_apply_data()
             count = len(self.apply_data[qqid])
-            body = f"玩家 {mcname} 绑定成功！已加入白名单（已绑定 {count} 个账号）"
+            body = f"玩家 {mcname} 绑定成功！（已绑定 {count} 个账号）"
             logger.info(f"[wantwl] {mcname} 绑定成功 (qq={qqid})")
         except Exception as e:
             body = f"玩家 {mcname} 绑定失败：{e}"
@@ -1183,17 +1183,17 @@ class MyPlugin(Star):
                 "[管] = 需管理员权限  |  别名写在括号内",
                 "",
                 "【白名单】",
-                "  /mcwl <add|remove|list> [MC名]  白名单管理（mcwhitelist）",
-                "  /wantwl <MC名>  申请绑定（私聊）",
+                "  /mcwl <add|remove|list> [游戏ID]  白名单管理（mcwhitelist）",
+                "  /wantwl <游戏ID>  申请绑定（私聊）",
                 "  /wantwllist  查看绑定（wantwll）",
-                "  /wantwlunbind <MC名>  解绑（wantwlu）",
+                "  /wantwlunbind <游戏ID>  解绑（wantwlu）",
                 "",
                 "【封禁】",
-                "  [管] /mcban <MC名> [原因]  封禁",
-                "  [管] /mcunban <MC名>  解封（mcpardon）",
+                "  [管] /mcban <游戏ID> [原因]  封禁",
+                "  [管] /mcunban <游戏ID>  解封（mcpardon）",
                 "  /mcbanlist  封禁列表（mcbl）",
-                "  [管] /mckick <MC名> [原因]  踢人（mck）",
-                "  [管] /mctempban <MC名> <时长> [原因]  临时封禁（mctb）",
+                "  [管] /mckick <游戏ID> [原因]  踢人（mck）",
+                "  [管] /mctempban <游戏ID> <时长> [原因]  临时封禁（mctb）",
                 "",
                 "【服务器】",
                 "  /mclist  在线玩家（mcl）",
@@ -1213,12 +1213,12 @@ class MyPlugin(Star):
                 "  /mcsignback [日期]  补签（mcbq）",
                 "  [管] /mcsignadmin  签到数据管理（msa）",
                 "  /mcmoney  查询铜钱（mcqian）",
-                "  /mctransfer <MC名> <数量>  转账（mczz）",
+                "  /mctransfer <游戏ID> <数量>  转账（mczz）",
                 "",
                 "【其他】",
-                "  [管] /mckill <MC名>  击杀",
+                "  [管] /mckill <游戏ID>  击杀",
                 "  [管] /mcrun <命令>  RCON 透传（mcexec）",
-                "  [管] /mcauthunregister <MC名>  AuthMe 注销",
+                "  [管] /mcauthunregister <游戏ID>  AuthMe 注销",
                 "  [管] /mcbindchat  绑定聊天转发",
                 f"  白名单申请：{want}",
                 "",
@@ -1437,12 +1437,12 @@ class MyPlugin(Star):
         qqid = str(event.get_sender_id())
         bound = self.apply_data.get(qqid, [])
         if not bound:
-            yield event.plain_result("你还没有绑定任何MC账号，使用 /wantwl <MC名> 申请。")
+            yield event.plain_result("你还没有绑定任何MC账号，使用 /wantwl <游戏ID> 申请。")
             return
         lines = [f"你已绑定 {len(bound)} 个MC账号："]
         for i, name in enumerate(bound, 1):
             lines.append(f"  {i}. {name}")
-        lines.append("\n使用 /wantwlunbind <MC名> 解绑指定账号。")
+        lines.append("\n使用 /wantwlunbind <游戏ID> 解绑指定账号。")
         yield event.plain_result("\n".join(lines))
 
     @filter.command("wantwlunbind", desc="解绑MC白名单账号", alias={"wantwlu"})
@@ -1531,7 +1531,7 @@ class MyPlugin(Star):
         pool = 0
         no_reward_reason = ""
         if not mcname:
-            no_reward_reason = "未绑定MC账号，不发放铜钱"
+            no_reward_reason = "未绑定MC账号，无法发放铜钱"
         elif yesterday_count > 0:
             pool = random.randint(self.sign_money_min, self.sign_money_max)
             base_reward = pool // yesterday_count
@@ -1700,7 +1700,7 @@ class MyPlugin(Star):
         qqid = str(event.get_sender_id())
         bound = self.apply_data.get(qqid, [])
         if not bound:
-            yield event.plain_result("你还没有绑定MC账号，请先使用 /wantwl <MC名> 绑定。")
+            yield event.plain_result("你还没有绑定MC账号，请先使用 /wantwl <游戏ID> 绑定。")
             return
         user_name = bound[0]
         # 支持查看指定月份：/mcsigncal 2026-06
@@ -1759,7 +1759,7 @@ class MyPlugin(Star):
         qqid = str(event.get_sender_id())
         bound = self.apply_data.get(qqid, [])
         if not bound:
-            yield event.plain_result("你还没有绑定MC账号，请先使用 /wantwl <MC名> 绑定。")
+            yield event.plain_result("你还没有绑定MC账号，请先使用 /wantwl <游戏ID> 绑定。")
             return
         mcname = bound[0]
         # /mcsignback 2026-06-13  或  /mcsignback 13（默认本月）
@@ -1896,7 +1896,7 @@ class MyPlugin(Star):
         else:
             bound = self.apply_data.get(qqid, [])
             if not bound:
-                yield event.plain_result("你还没有绑定MC账号，请先使用 /wantwl <MC名> 绑定。")
+                yield event.plain_result("你还没有绑定MC账号，请先使用 /wantwl <游戏ID> 绑定。")
                 return
             targets = bound
         lines = []
@@ -1912,13 +1912,13 @@ class MyPlugin(Star):
                 lines.append(f"  {name}: 查询失败 - {e}")
         yield event.plain_result("铜钱余额：\n" + "\n".join(lines))
 
-    @filter.command("mctransfer", desc="转账铜钱给其他玩家", alias={"mctrans", "mczz"})
+    @filter.command("mctransfer", desc="转账铜钱给其他玩家", alias={"mctrans", "mczz", "转账"})
     async def mctransfer(self, event: AstrMessageEvent):
         qqid = str(event.get_sender_id())
-        raw = self._event_message_str(event)
-        m = re.match(r"^/?mctrans(?:fer)?\s+(\S+)\s+(\d+)\s*$", raw, re.IGNORECASE)
+        raw = self._tail_after_command_names(event, "mctransfer", "mctrans", "mczz", "转账")
+        m = re.match(r"^(\S+)\s+(\d+)\s*$", raw)
         if not m:
-            yield event.plain_result("用法：/mctransfer <MC名> <数量>\n例如：/mctransfer Steve 100")
+            yield event.plain_result("用法：/mctransfer <游戏ID> <数量>\n例如：/mctransfer Steve 100")
             return
         receiver_mc = m.group(1).lstrip("@")
         amount = int(m.group(2))
@@ -1928,7 +1928,7 @@ class MyPlugin(Star):
         # 检查发送方绑定
         sender_bound = self.apply_data.get(qqid, [])
         if not sender_bound:
-            yield event.plain_result("你还没有绑定MC账号，请先使用 /wantwl <MC名> 绑定。")
+            yield event.plain_result("你还没有绑定MC账号，请先使用 /wantwl <游戏ID> 绑定。")
             return
         sender_mc = sender_bound[0]
         if sender_mc == receiver_mc:
