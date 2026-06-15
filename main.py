@@ -1480,6 +1480,7 @@ class MyPlugin(Star):
             yield event.plain_result("抱歉，签到功能未开启。")
             return
         qqid = str(event.get_sender_id())
+        user_name = event.get_sender_name()
         bound = self.apply_data.get(qqid, [])
         mcname = bound[0] if bound else None
         today = time.strftime("%Y-%m-%d")
@@ -1495,7 +1496,19 @@ class MyPlugin(Star):
         bonus_mult, bonus_desc = self._sign_bonus_multiplier(streak)
 
         if qqid in self._get_all_signed_qqids(today):
-            # 已签到，显示完整信息
+            # 已签到，尝试图片卡片
+            already_img = self._generate_sign_card(
+                user_name, mcname, 0, 0, yesterday_count,
+                today_count, streak, max_streak, fortune,
+                no_reward_reason="✅ 今日已签到", total_days=total_days,
+            )
+            if already_img:
+                try:
+                    import base64
+                    yield event.make_result().base64_image(base64.b64encode(already_img).decode())
+                    return
+                except Exception as e:
+                    logger.warning(f"[mcsign] 发送已签到卡片失败: {e}")
             lines = [
                 "✅ 今日已签到",
                 f"累计 {total_days} 天  |  连续 {streak} 天  |  最高 {max_streak} 天  |  加成 {bonus_desc or '无'}",
@@ -1532,6 +1545,21 @@ class MyPlugin(Star):
         else:
             no_reward_reason = "昨日无人签到，今日无奖励"
 
+        # 尝试图片卡片
+        card_img = self._generate_sign_card(
+            user_name, mcname, reward, pool, yesterday_count,
+            today_count, streak, max_streak, fortune, no_reward_reason,
+            base_reward, bonus_desc, total_days,
+        )
+        if card_img:
+            try:
+                import base64
+                yield event.make_result().base64_image(base64.b64encode(card_img).decode())
+                return
+            except Exception as e:
+                logger.warning(f"[mcsign] 发送签到卡片失败: {e}")
+
+        # 文本兜底
         lines = [
             f"签到成功！{'（' + no_reward_reason + '）' if no_reward_reason else ''}",
         ]
@@ -1680,7 +1708,17 @@ class MyPlugin(Star):
                 if not (1 <= month <= 12):
                     yield event.plain_result("月份无效，请用格式 /mcsigncal 2026-06")
                     return
-        # 文本日历
+        # 尝试图片日历
+        img_bytes = self._generate_sign_calendar(qqid, user_name, year, month)
+        if img_bytes:
+            try:
+                import base64
+                b64 = base64.b64encode(img_bytes).decode()
+                yield event.make_result().base64_image(b64)
+                return
+            except Exception as e:
+                logger.warning(f"[mcsigncal] 发送图片日历失败: {e}")
+        # 文本日历兜底
         now = datetime.now()
         y = year or now.year
         m = month or now.month
