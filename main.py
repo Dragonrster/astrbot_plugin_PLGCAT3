@@ -1991,9 +1991,10 @@ class MyPlugin(Star):
         if amount <= 0:
             yield event.plain_result("金额必须大于 0。")
             return
-        # 解析收款方：尝试从消息链提取 @ 的 QQ 号
+        # 解析收款方：尝试提取 @ 的 QQ 号
         receiver_qq = ""
         receiver_mc = ""
+        # 方法1：从消息链 At 段提取
         if hasattr(event, "message_obj") and hasattr(event.message_obj, "message"):
             for seg in event.message_obj.message:
                 seg_type = str(getattr(seg, "type", "")).lower()
@@ -2001,7 +2002,15 @@ class MyPlugin(Star):
                 if seg_type in ("at",) and seg_id:
                     receiver_qq = str(seg_id)
                     break
-        logger.info(f"[mctransfer] receiver_input={receiver_input} receiver_qq={receiver_qq} apply_data_keys={list(self.apply_data.keys())[:10]}")
+        # 方法2：从文本 [At:XXXXX] 格式提取
+        if not receiver_qq:
+            at_match = re.match(r"^\[At:(\d+)\]$", receiver_input)
+            if at_match:
+                receiver_qq = at_match.group(1)
+        # 方法3：纯数字 QQ 号
+        if not receiver_qq and receiver_input.isdigit():
+            receiver_qq = receiver_input
+        logger.info(f"[mctransfer] receiver_input={receiver_input} receiver_qq={receiver_qq}")
         # 从 QQ 号解析 MC 名
         if receiver_qq and receiver_qq in self.apply_data:
             bound_list = self.apply_data[receiver_qq]
@@ -2010,13 +2019,9 @@ class MyPlugin(Star):
             else:
                 yield event.plain_result(f"QQ {receiver_qq} 没有绑定MC账号。")
                 return
-        elif receiver_input.isdigit() and receiver_input in self.apply_data:
-            bound_list = self.apply_data[receiver_input]
-            if bound_list:
-                receiver_mc = bound_list[0]
-            else:
-                yield event.plain_result(f"QQ {receiver_input} 没有绑定MC账号。")
-                return
+        elif receiver_qq:
+            yield event.plain_result(f"QQ {receiver_qq} 没有绑定MC账号。")
+            return
         else:
             receiver_mc = receiver_input
         logger.info(f"[mctransfer] 最终 receiver_mc={receiver_mc}")
