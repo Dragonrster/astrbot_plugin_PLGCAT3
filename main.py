@@ -1973,10 +1973,10 @@ class MyPlugin(Star):
             return raw_input
         return ""
 
-    @filter.command("mcmoney", desc="查询铜钱余额", alias={"mcqian", "mcq"})
+    @filter.command("mcmoney", desc="查询铜钱余额", alias={"mcqian", "mcq", "余额"})
     async def mcmoney(self, event: AstrMessageEvent):
         qqid = str(event.get_sender_id())
-        raw = self._tail_after_command_names(event, "mcmoney", "mcqian", "mcq")
+        raw = self._tail_after_command_names(event, "mcmoney", "mcqian", "mcq", "余额")
         raw = raw.strip().lstrip("@")
         if raw:
             # 尝试从 @ 解析 QQ 号
@@ -2067,6 +2067,9 @@ class MyPlugin(Star):
         else:
             receiver_mc = receiver_input
         logger.info(f"[mctransfer] 最终 receiver_mc={receiver_mc}")
+        if not receiver_mc or not receiver_mc.strip():
+            yield event.plain_result("收款方不能为空，请 @ 一位玩家或输入 MC 游戏名。")
+            return
         # 检查发送方绑定
         sender_bound = self.apply_data.get(qqid, [])
         if not sender_bound:
