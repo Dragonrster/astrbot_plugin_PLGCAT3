@@ -2010,6 +2010,8 @@ class MyPlugin(Star):
                     self.rcon_host, self.rcon_port, self.rcon_password, cmd
                 )
                 cresp = strip_mc_color(resp).strip()
+                # 去掉 RCON 响应中的玩家名前缀（如 "dabai_qwq当前存款:xxx"）
+                cresp = re.sub(r"^[^\s:：]+[：:]\s*", "", cresp).strip()
                 lines.append(f"  {name}: {cresp if cresp else '(空响应)'}")
             except Exception as e:
                 lines.append(f"  {name}: 查询失败 - {e}")
