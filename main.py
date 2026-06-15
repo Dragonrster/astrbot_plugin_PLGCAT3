@@ -1391,7 +1391,7 @@ class MyPlugin(Star):
             code = "".join(random.choices("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=6))
             self._wl_pending[qqid] = {"mcname": mcname, "code": code, "expire": time.time() + 300}
             yield event.plain_result(
-                f"请在游戏内聊天发送以下内容完成绑定：\n.wantwl {code}\n（5分钟内有效）"
+                f"请在游戏内聊天发送以下内容完成绑定：\n.wantwl {code}（5分钟内有效）"
             )
             return
 
@@ -1480,7 +1480,6 @@ class MyPlugin(Star):
             yield event.plain_result("抱歉，签到功能未开启。")
             return
         qqid = str(event.get_sender_id())
-        user_name = event.get_sender_name()
         bound = self.apply_data.get(qqid, [])
         mcname = bound[0] if bound else None
         today = time.strftime("%Y-%m-%d")
@@ -1496,22 +1495,7 @@ class MyPlugin(Star):
         bonus_mult, bonus_desc = self._sign_bonus_multiplier(streak)
 
         if qqid in self._get_all_signed_qqids(today):
-            # 已签到，显示完整信息卡片
-            already_img = self._generate_sign_card(
-                user_name, mcname, 0, 0, yesterday_count,
-                today_count, streak, max_streak, fortune,
-                no_reward_reason="✅ 今日已签到",
-                total_days=total_days,
-            )
-            if already_img:
-                try:
-                    import base64
-                    b64 = base64.b64encode(already_img).decode()
-                    chain = MessageChain().base64_image(b64)
-                    yield event.chain_result(chain.chain)
-                    return
-                except Exception as e:
-                    logger.warning(f"[mcsign] 发送已签到卡片失败: {e}")
+            # 已签到，显示完整信息
             lines = [
                 "✅ 今日已签到",
                 f"累计 {total_days} 天  |  连续 {streak} 天  |  最高 {max_streak} 天  |  加成 {bonus_desc or '无'}",
@@ -1548,23 +1532,6 @@ class MyPlugin(Star):
         else:
             no_reward_reason = "昨日无人签到，今日无奖励"
 
-        # 尝试生成图片卡片
-        img_bytes = self._generate_sign_card(
-            user_name, mcname, reward, pool, yesterday_count,
-            today_count, streak, max_streak, fortune, no_reward_reason,
-            base_reward, bonus_desc, total_days,
-        )
-        if img_bytes:
-            try:
-                import base64
-                b64 = base64.b64encode(img_bytes).decode()
-                chain = MessageChain().base64_image(b64)
-                yield event.chain_result(chain)
-                return
-            except Exception as e:
-                logger.warning(f"[mcsign] 发送签到卡片失败: {e}")
-
-        # 图片兜底
         lines = [
             f"签到成功！{'（' + no_reward_reason + '）' if no_reward_reason else ''}",
         ]
@@ -1742,14 +1709,32 @@ class MyPlugin(Star):
                 lines.append(row.rstrip())
             yield event.plain_result("\n".join(lines))
             return
-        try:
-            import base64
-            b64 = base64.b64encode(img_bytes).decode()
-            chain = MessageChain().base64_image(b64)
-            yield event.chain_result(chain)
-        except Exception as e:
-            logger.warning(f"发送签到日历图片失败: {e}")
-            yield event.plain_result(f"生成日历图片失败：{e}")
+        # 图片已生成但 AstrBot 不支持图片发送，使用文本日历
+        now = datetime.now()
+        y = year or now.year
+        m = month or now.month
+        total = calendar.monthrange(y, m)[1]
+        signed = []
+        for d in range(1, total + 1):
+            ds = f"{y}-{m:02d}-{d:02d}"
+            if qqid in self._get_all_signed_qqids(ds):
+                signed.append(d)
+        streak = self._sign_consecutive_days(qqid)
+        max_streak = self._sign_max_consecutive_days(qqid)
+        lines = [f"📅 {y} 年 {m} 月签到日历（{user_name}）", f"签到 {len(signed)}/{total} 天  |  连续 {streak} 天  |  最高 {max_streak} 天", ""]
+        week = "日 一 二 三 四 五 六"
+        lines.append(week)
+        first_weekday, _ = calendar.monthrange(y, m)
+        row = "   " * first_weekday
+        for d in range(1, total + 1):
+            tag = f"{'✅' if d in signed else d:2}"
+            row += f"{tag} "
+            if (first_weekday + d) % 7 == 0:
+                lines.append(row.rstrip())
+                row = ""
+        if row.strip():
+            lines.append(row.rstrip())
+        yield event.plain_result("\n".join(lines))
 
     @filter.command("mcsignback", desc="补签（花铜钱补往日签到）", alias={"mcsignbackfill", "mcbq"})
     async def mcsignback(self, event: AstrMessageEvent):
