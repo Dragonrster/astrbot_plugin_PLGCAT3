@@ -1680,36 +1680,7 @@ class MyPlugin(Star):
                 if not (1 <= month <= 12):
                     yield event.plain_result("月份无效，请用格式 /mcsigncal 2026-06")
                     return
-        img_bytes = self._generate_sign_calendar(qqid, user_name, year, month)
-        if img_bytes is None:
-            # 无 Pillow，退化为文本日历
-            now = datetime.now()
-            y = year or now.year
-            m = month or now.month
-            total = calendar.monthrange(y, m)[1]
-            signed = []
-            for d in range(1, total + 1):
-                ds = f"{y}-{m:02d}-{d:02d}"
-                if qqid in self._get_all_signed_qqids(ds):
-                    signed.append(d)
-            streak = self._sign_consecutive_days(qqid)
-            max_streak = self._sign_max_consecutive_days(qqid)
-            lines = [f"📅 {y} 年 {m} 月签到日历（{user_name}）", f"签到 {len(signed)}/{total} 天  |  连续 {streak} 天  |  最高 {max_streak} 天", ""]
-            week = "日 一 二 三 四 五 六"
-            lines.append(week)
-            first_weekday, _ = calendar.monthrange(y, m)
-            row = "   " * first_weekday
-            for d in range(1, total + 1):
-                tag = f"{'✅' if d in signed else d:2}"
-                row += f"{tag} "
-                if (first_weekday + d) % 7 == 0:
-                    lines.append(row.rstrip())
-                    row = ""
-            if row.strip():
-                lines.append(row.rstrip())
-            yield event.plain_result("\n".join(lines))
-            return
-        # 图片已生成但 AstrBot 不支持图片发送，使用文本日历
+        # 文本日历
         now = datetime.now()
         y = year or now.year
         m = month or now.month
