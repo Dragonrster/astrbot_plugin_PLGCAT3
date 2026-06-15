@@ -1950,15 +1950,52 @@ class MyPlugin(Star):
             f"连续 {streak} 天  |  最高 {max_streak} 天"
         )
 
+    @staticmethod
+    def _resolve_at_qq(raw_input: str, event: AstrMessageEvent) -> str:
+        """从 @ 提取 QQ 号，支持消息链 At 段、昵称(QQ号)、[At:XXX]、纯数字。"""
+        # 方法1：消息链 At 段
+        if hasattr(event, "message_obj") and hasattr(event.message_obj, "message"):
+            for seg in event.message_obj.message:
+                seg_type = str(getattr(seg, "type", "")).lower()
+                seg_id = getattr(seg, "qq", None) or getattr(seg, "id", None)
+                if seg_type in ("at",) and seg_id:
+                    return str(seg_id)
+        # 方法2：昵称(QQ号)
+        m = re.search(r"\((\d{5,})\)\s*$", raw_input)
+        if m:
+            return m.group(1)
+        # 方法3：[At:XXX]
+        m = re.match(r"^\[At:(\d+)\]$", raw_input)
+        if m:
+            return m.group(1)
+        # 方法4：纯数字
+        if raw_input.isdigit():
+            return raw_input
+        return ""
+
     @filter.command("mcmoney", desc="查询铜钱余额", alias={"mcqian", "mcq"})
-    async def mcmoney(self, event: AstrMessageEvent, mcname: str = ""):
+    async def mcmoney(self, event: AstrMessageEvent):
         qqid = str(event.get_sender_id())
-        if mcname:
-            # 管理员查询指定玩家
-            if not self.is_admin(qqid):
-                yield event.plain_result("只有管理员可以查询他人的铜钱余额。")
+        raw = self._tail_after_command_names(event, "mcmoney", "mcqian", "mcq")
+        raw = raw.strip().lstrip("@")
+        if raw:
+            # 尝试从 @ 解析 QQ 号
+            at_qq = self._resolve_at_qq(raw, event)
+            if at_qq and at_qq in self.apply_data:
+                bound_list = self.apply_data[at_qq]
+                if not bound_list:
+                    yield event.plain_result(f"QQ {at_qq} 没有绑定MC账号。")
+                    return
+                targets = bound_list
+            elif at_qq:
+                yield event.plain_result(f"QQ {at_qq} 没有绑定MC账号。")
                 return
-            targets = [mcname]
+            else:
+                # 直接 MC 名（管理员查询）
+                if not self.is_admin(qqid):
+                    yield event.plain_result("只有管理员可以查询他人的铜钱余额。")
+                    return
+                targets = [raw]
         else:
             bound = self.apply_data.get(qqid, [])
             if not bound:
