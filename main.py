@@ -529,7 +529,69 @@ class MyPlugin(Star):
         """基于 QQ 号和日期生成每日占卜（同一天同一人结果固定）。"""
         seed = hash(f"{qqid}:{date_str}") & 0xFFFFFFFF
         rng = random.Random(seed)
-        levels = ["大吉", "中吉", "小吉", "吉", "末吉", "凶"]
+        levels = [
+            "上上",
+            "元吉",
+            "大吉昌",
+            "至吉",
+            "天吉",  # 大吉
+            "上中",
+            "中上",
+            "允吉",
+            "显吉",
+            "顺吉",  # 中吉
+            "中平",
+            "稍吉",
+            "微吉",
+            "下上",
+            "小吉昌",  # 小吉
+            "平平",
+            "下吉",
+            "常吉",
+            "守吉",
+            "浅吉",  # 吉
+            "下中",
+            "末等",
+            "浅末",
+            "趋吉",
+            "转吉",  # 末吉
+            "下下",
+            "次凶",
+            "厉",
+            "咎",
+            "悔",  # 凶
+            "极凶",
+            "至凶",
+            "死符",
+            "大厄",
+            "凶极",  # 大凶
+            "微凶",
+            "稍咎",
+            "下末",
+            "损",
+            "耗",  # 小凶
+            "中平",
+            "无咎",
+            "平顺",
+            "常平",
+            "中和",  # 平
+            "小吉平",
+            "微吉",
+            "平中带吉",
+            "浅喜",
+            "平善",  # 平吉
+            "先凶后吉",
+            "悔厉",
+            "转机",
+            "危中有安",
+            "凶化",  # 凶中带吉
+            "大吉",
+            "中吉",
+            "小吉",
+            "吉",
+            "末吉",
+            "凶",
+        ]
         weights = [10, 20, 25, 25, 15, 5]
         level = rng.choices(levels, weights=weights, k=1)[0]
         colors = [
@@ -1529,6 +1591,8 @@ class MyPlugin(Star):
         no_reward_reason = ""
         if not mcname:
             no_reward_reason = "未绑定MC账号，无法发放铜钱"
+        elif qqid not in yesterday_signers_only:
+            no_reward_reason = "昨日未签到，无法领取今日奖励"
         elif yesterday_count > 0:
             pool = random.randint(self.sign_money_min, self.sign_money_max)
             base_reward = pool // yesterday_count
