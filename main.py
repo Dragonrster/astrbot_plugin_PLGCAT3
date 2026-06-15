@@ -1508,7 +1508,7 @@ class MyPlugin(Star):
                     import base64
                     b64 = base64.b64encode(already_img).decode()
                     chain = MessageChain().base64_image(b64)
-                    yield event.chain_result(chain)
+                    yield event.chain_result(chain.chain)
                     return
                 except Exception as e:
                     logger.warning(f"[mcsign] 发送已签到卡片失败: {e}")
