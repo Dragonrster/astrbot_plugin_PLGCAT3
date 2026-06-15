@@ -1986,11 +1986,20 @@ class MyPlugin(Star):
         if not m:
             yield event.plain_result("用法：/mctransfer <游戏ID> <数量>\n例如：/mctransfer Steve 100")
             return
-        receiver_mc = m.group(1).lstrip("@")
+        receiver_input = m.group(1).lstrip("@")
         amount = int(m.group(2))
         if amount <= 0:
             yield event.plain_result("金额必须大于 0。")
             return
+        # 解析收款方：优先 QQ 号 → 绑定的 MC 名，否则当 MC 名
+        if receiver_input.isdigit() and receiver_input in self.apply_data:
+            receiver_bound = self.apply_data[receiver_input]
+            if not receiver_bound:
+                yield event.plain_result(f"QQ {receiver_input} 没有绑定MC账号。")
+                return
+            receiver_mc = receiver_bound[0]
+        else:
+            receiver_mc = receiver_input
         # 检查发送方绑定
         sender_bound = self.apply_data.get(qqid, [])
         if not sender_bound:
