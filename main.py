@@ -1643,7 +1643,14 @@ class MyPlugin(Star):
         elif qqid not in yesterday_signers_only:
             no_reward_reason = "昨日未签到，无法领取今日奖励"
         elif yesterday_count > 0:
-            pool = random.randint(self.sign_money_min, self.sign_money_max)
+            # 奖池每天固定一次，所有人共享
+            today_pool_key = f"{today}_pool"
+            if today_pool_key in self.sign_data:
+                pool = self.sign_data[today_pool_key]
+            else:
+                pool = random.randint(self.sign_money_min, self.sign_money_max)
+                self.sign_data[today_pool_key] = pool
+                self._save_sign_data()
             base_reward = pool // yesterday_count
             if base_reward > 0:
                 reward = int(base_reward * bonus_mult)
