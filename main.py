@@ -2239,17 +2239,16 @@ class MyPlugin(Star):
         max_streak = self._sign_max_consecutive_days(qqid)
         _, bonus_desc = self._sign_bonus_multiplier(streak)
         fortune = self._generate_fortune(qqid, today)
-        # 在线状态
+        # 在线状态（通过 RCON list 命令检测）
         is_online = False
         if mc_name:
             try:
-                status = await mc_server_list_ping(self.rcon_host, self.mc_server_port)
-                sample = status.get("players", {}).get("sample", []) or []
-                online_names = {p.get("name", "").lower() for p in sample}
-                is_online = mc_name.lower() in online_names
+                list_resp = await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, "list")
+                is_online = mc_name.lower() in strip_mc_color(list_resp).lower()
             except Exception:
                 pass
         # 渲染 HTML
+        logger.info(f"[mcprofile] jinja2={_HAS_JINJA2}")
         if _HAS_JINJA2:
             tpl_html = _load_template("profile_template.html")
             if tpl_html:
@@ -2266,6 +2265,8 @@ class MyPlugin(Star):
                         import base64
                         yield event.make_result().base64_image(base64.b64encode(img_bytes).decode())
                         return
+                    else:
+                        logger.warning("[mcprofile] _html_to_png 返回 None，需要安装 playwright")
                 except Exception as e:
                     logger.warning(f"[mcprofile] HTML 渲染失败: {e}")
         # 文本兜底
