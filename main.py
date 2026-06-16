@@ -1610,7 +1610,8 @@ class MyPlugin(Star):
             already_img = self._generate_sign_card(
                 user_name, mcname, 0, 0, yesterday_count,
                 today_count, streak, max_streak, fortune,
-                no_reward_reason="✅ 今日已签到", total_days=total_days,
+                no_reward_reason="✅ 今日已签到",
+                bonus_desc=bonus_desc, total_days=total_days,
             )
             if already_img:
                 try:
