@@ -110,13 +110,16 @@ def _html_to_png(html: str, width: int = 420) -> bytes | None:
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
+            browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-gpu"])
             page = browser.new_page(viewport={"width": width, "height": 800})
-            page.set_content(html, wait_until="networkidle")
+            page.set_content(html, wait_until="load")
+            # 等字体加载完
+            page.wait_for_timeout(200)
             # 自适应高度
             body_height = page.evaluate("document.body.scrollHeight")
-            page.set_viewport_size({"width": width, "height": body_height + 10})
-            screenshot = page.screenshot(type="png")
+            page.set_viewport_size({"width": width, "height": body_height + 20})
+            page.wait_for_timeout(50)
+            screenshot = page.screenshot(type="png", full_page=True)
             browser.close()
             return screenshot
     except Exception:
