@@ -104,38 +104,25 @@ def strip_mc_color(text: str) -> str:
 _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
-def _html_to_png(html: str, width: int = 420) -> bytes | None:
-    """将 HTML 渲染为 PNG bytes。优先 playwright，兜底 PIL。"""
-    # 尝试 playwright
+async def _html_to_png(html: str, width: int = 420) -> bytes | None:
+    """将 HTML 渲染为 PNG bytes。使用 playwright async API。"""
     try:
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-gpu"])
-            page = browser.new_page(viewport={"width": width, "height": 800})
-            page.set_content(html, wait_until="load")
-            page.wait_for_timeout(200)
-            body_height = page.evaluate("document.body.scrollHeight")
-            page.set_viewport_size({"width": width, "height": body_height + 20})
-            page.wait_for_timeout(50)
-            screenshot = page.screenshot(type="png", full_page=True)
-            browser.close()
+        from playwright.async_api import async_playwright
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-gpu"])
+            page = await browser.new_page(viewport={"width": width, "height": 800})
+            await page.set_content(html, wait_until="load")
+            await page.wait_for_timeout(200)
+            body_height = await page.evaluate("document.body.scrollHeight")
+            await page.set_viewport_size({"width": width, "height": body_height + 20})
+            await page.wait_for_timeout(50)
+            screenshot = await page.screenshot(type="png", full_page=True)
+            await browser.close()
             logger.info(f"[html_to_png] playwright 截图成功, {len(screenshot)} bytes")
             return screenshot
     except Exception as e:
         logger.warning(f"[html_to_png] playwright 失败: {e}")
-    # 尝试 html2image
-    try:
-        from html2image import Html2Image
-        hti = Html2Image(output_path="/tmp", custom_flags=["--no-sandbox", "--disable-gpu"])
-        paths = hti.screenshot(html_str=html, save_as="sign_card.png", size=(width, 800))
-        if paths:
-            with open(paths[0], "rb") as f:
-                data = f.read()
-            logger.info(f"[html_to_png] html2image 截图成功, {len(data)} bytes")
-            return data
-    except Exception as e:
-        logger.warning(f"[html_to_png] html2image 失败: {e}")
-    logger.warning("[html_to_png] 所有渲染方式均失败")
+    logger.warning("[html_to_png] 渲染失败")
     return None
 
 
@@ -731,7 +718,7 @@ class MyPlugin(Star):
         msg = rng.choice(messages.get(level, ["万事随缘。"]))
         return {"level": level, "color": lucky_color, "number": lucky_num, "message": msg}
 
-    def _generate_sign_card(
+    async def _generate_sign_card(
         self, user_name: str, mcname: str | None, reward: int, pool: int,
         yesterday_count: int, today_count: int, streak: int, max_streak: int,
         fortune: dict, no_reward_reason: str = "",
@@ -756,7 +743,7 @@ class MyPlugin(Star):
                         streak=streak, max_streak=max_streak,
                         fortune=fortune,
                     )
-                    img_bytes = _html_to_png(html, width=420)
+                    img_bytes = await _html_to_png(html, width=420)
                     if img_bytes:
                         return img_bytes
                 except Exception as e:
@@ -823,7 +810,7 @@ class MyPlugin(Star):
         img.save(buf, format="PNG", optimize=True)
         return buf.getvalue()
 
-    def _generate_sign_calendar(self, qqid: str, user_name: str, year: int = None, month: int = None) -> bytes | None:
+    async def _generate_sign_calendar(self, qqid: str, user_name: str, year: int = None, month: int = None) -> bytes | None:
         """生成签到日历图片，优先 HTML 模板，兜底 PIL。"""
         now = datetime.now()
         year = year or now.year
@@ -859,7 +846,7 @@ class MyPlugin(Star):
                         signed_count=len(signed_days), total_days=total_days_in_month,
                         streak=streak, max_streak=max_streak, weeks=weeks,
                     )
-                    img_bytes = _html_to_png(html, width=460)
+                    img_bytes = await _html_to_png(html, width=460)
                     if img_bytes:
                         return img_bytes
                 except Exception as e:
@@ -1610,7 +1597,7 @@ class MyPlugin(Star):
 
         if qqid in self._get_all_signed_qqids(today):
             # 已签到，尝试图片卡片
-            already_img = self._generate_sign_card(
+            already_img = await self._generate_sign_card(
                 user_name, mcname, 0, 0, yesterday_count,
                 today_count, streak, max_streak, fortune,
                 no_reward_reason="✅ 今日已签到",
@@ -1669,7 +1656,7 @@ class MyPlugin(Star):
             no_reward_reason = "昨日无人签到，今日无奖励"
 
         # 尝试图片卡片
-        card_img = self._generate_sign_card(
+        card_img = await self._generate_sign_card(
             user_name, mcname, reward, pool, yesterday_count,
             today_count, streak, max_streak, fortune, no_reward_reason,
             base_reward, bonus_desc, total_days,
@@ -1832,7 +1819,7 @@ class MyPlugin(Star):
                     yield event.plain_result("月份无效，请用格式 /mcsigncal 2026-06")
                     return
         # 尝试图片日历
-        img_bytes = self._generate_sign_calendar(qqid, user_name, year, month)
+        img_bytes = await self._generate_sign_calendar(qqid, user_name, year, month)
         if img_bytes:
             try:
                 import base64
@@ -2266,7 +2253,7 @@ class MyPlugin(Star):
                         fortune=fortune,
                     )
                     logger.info(f"[mcprofile] HTML 渲染完成, html_len={len(html)}")
-                    img_bytes = _html_to_png(html, width=420)
+                    img_bytes = await _html_to_png(html, width=420)
                     logger.info(f"[mcprofile] img_bytes={'有('+str(len(img_bytes))+')' if img_bytes else 'None'}")
                     if img_bytes:
                         import base64
