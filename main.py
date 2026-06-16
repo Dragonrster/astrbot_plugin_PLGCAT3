@@ -113,17 +113,16 @@ def _html_to_png(html: str, width: int = 420) -> bytes | None:
             browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-gpu"])
             page = browser.new_page(viewport={"width": width, "height": 800})
             page.set_content(html, wait_until="load")
-            # 等字体加载完
             page.wait_for_timeout(200)
-            # 自适应高度
             body_height = page.evaluate("document.body.scrollHeight")
             page.set_viewport_size({"width": width, "height": body_height + 20})
             page.wait_for_timeout(50)
             screenshot = page.screenshot(type="png", full_page=True)
             browser.close()
+            logger.info(f"[html_to_png] playwright 截图成功, {len(screenshot)} bytes")
             return screenshot
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"[html_to_png] playwright 失败: {e}")
     # 尝试 html2image
     try:
         from html2image import Html2Image
@@ -131,9 +130,12 @@ def _html_to_png(html: str, width: int = 420) -> bytes | None:
         paths = hti.screenshot(html_str=html, save_as="sign_card.png", size=(width, 800))
         if paths:
             with open(paths[0], "rb") as f:
-                return f.read()
-    except Exception:
-        pass
+                data = f.read()
+            logger.info(f"[html_to_png] html2image 截图成功, {len(data)} bytes")
+            return data
+    except Exception as e:
+        logger.warning(f"[html_to_png] html2image 失败: {e}")
+    logger.warning("[html_to_png] 所有渲染方式均失败")
     return None
 
 
@@ -2248,9 +2250,12 @@ class MyPlugin(Star):
             except Exception:
                 pass
         # 渲染 HTML
-        logger.info(f"[mcprofile] jinja2={_HAS_JINJA2}")
-        if _HAS_JINJA2:
+        tpl_path = os.path.join(_PLUGIN_DIR, "profile_template.html")
+        tpl_exists = os.path.isfile(tpl_path)
+        logger.info(f"[mcprofile] jinja2={_HAS_JINJA2} tpl_exists={tpl_exists} tpl_path={tpl_path}")
+        if _HAS_JINJA2 and tpl_exists:
             tpl_html = _load_template("profile_template.html")
+            logger.info(f"[mcprofile] tpl_html_len={len(tpl_html) if tpl_html else 'None'}")
             if tpl_html:
                 try:
                     html = Template(tpl_html).render(
@@ -2260,15 +2265,21 @@ class MyPlugin(Star):
                         max_streak=max_streak, bonus_desc=bonus_desc,
                         fortune=fortune,
                     )
+                    logger.info(f"[mcprofile] HTML 渲染完成, html_len={len(html)}")
                     img_bytes = _html_to_png(html, width=420)
+                    logger.info(f"[mcprofile] img_bytes={'有('+str(len(img_bytes))+')' if img_bytes else 'None'}")
                     if img_bytes:
                         import base64
                         yield event.make_result().base64_image(base64.b64encode(img_bytes).decode())
                         return
                     else:
-                        logger.warning("[mcprofile] _html_to_png 返回 None，需要安装 playwright")
+                        logger.warning("[mcprofile] _html_to_png 返回 None，playwright chromium 可能未安装")
                 except Exception as e:
-                    logger.warning(f"[mcprofile] HTML 渲染失败: {e}")
+                    logger.warning(f"[mcprofile] HTML 渲染异常: {e}", exc_info=True)
+        elif not _HAS_JINJA2:
+            logger.warning("[mcprofile] jinja2 未安装，pip install jinja2")
+        elif not tpl_exists:
+            logger.warning(f"[mcprofile] 模板文件不存在: {tpl_path}")
         # 文本兜底
         lines = [f"═══ {qq_name} 的名片 ═══"]
         if mc_name:
