@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: "Noto Sans SC", "Microsoft YaHei", "PingFang SC", sans-serif; width: 420px; background: #fff; }
+
+.header { background: #4CAF50; padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; }
+.header h1 { color: #fff; font-size: 20px; }
+.header .date { color: #E8F5E9; font-size: 13px; }
+
+.user-info { padding: 10px 20px; }
+.user-info .name { font-size: 18px; font-weight: bold; color: #333; }
+.user-info .mc { font-size: 13px; color: #666; margin-top: 2px; }
+
+.reward-box { margin: 0 15px; padding: 12px 15px; background: #FFF8E1; border: 2px solid #FFB74D; border-radius: 8px; }
+.reward-box .label { font-size: 12px; color: #666; }
+.reward-box .amount { font-size: 32px; font-weight: bold; color: #E65100; display: inline-block; margin-top: 4px; }
+.reward-box .info { font-size: 11px; color: #999; display: inline-block; margin-left: 10px; vertical-align: bottom; margin-bottom: 6px; }
+.reward-box .no-reward { font-size: 13px; color: #999; padding: 8px 0; }
+
+.stats { display: flex; margin: 12px 15px; gap: 6px; }
+.stat-box { flex: 1; background: #F5F5F5; border: 1px solid #E0E0E0; border-radius: 6px; padding: 8px 8px 6px; text-align: center; }
+.stat-box .stat-label { font-size: 11px; color: #999; }
+.stat-box .stat-value { font-size: 17px; font-weight: bold; color: #333; margin-top: 2px; }
+.stat-box .stat-value.green { color: #4CAF50; }
+
+.fortune-box { margin: 0 15px; padding: 12px 15px; background: #F3E5F5; border: 2px solid #CE93D8; border-radius: 8px; }
+.fortune-box .fortune-title { font-size: 16px; font-weight: bold; color: #7B1FA2; margin-bottom: 8px; }
+.fortune-level { font-size: 24px; font-weight: bold; display: inline-block; }
+.fortune-meta { font-size: 12px; color: #666; display: inline-block; margin-left: 8px; vertical-align: middle; }
+.fortune-msg { font-size: 15px; color: #333; margin-top: 10px; line-height: 1.5; }
+
+.level-大吉 { color: #D32F2F; }
+.level-中吉 { color: #F57C00; }
+.level-小吉 { color: #FBC02D; }
+.level-吉 { color: #388E3C; }
+.level-末吉 { color: #1976D2; }
+.level-凶 { color: #616161; }
+.level-上上, .level-元吉, .level-大吉昌, .level-至吉, .level-天吉 { color: #D32F2F; }
+.level-上中, .level-中上, .level-允吉, .level-显吉, .level-顺吉 { color: #E65100; }
+.level-极凶, .level-至凶, .level-死符, .level-大厄, .level-凶极 { color: #212121; }
+
+.badge { display: inline-block; font-size: 10px; padding: 2px 6px; border-radius: 4px; margin-left: 6px; vertical-align: middle; }
+.badge-signed { background: #E8F5E9; color: #2E7D32; }
+.badge-no-reward { background: #FFF3E0; color: #E65100; }
+
+.signed-banner { text-align: center; padding: 8px; background: #E8F5E9; color: #2E7D32; font-size: 14px; font-weight: bold; border-radius: 6px; margin: 0 15px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>每日签到</h1>
+  <span class="date">{{ date }}</span>
+</div>
+
+<div class="user-info">
+  <div class="name">
+    {{ user_name }}
+    {% if is_already_signed %}<span class="badge badge-signed">✅ 已签到</span>{% endif %}
+  </div>
+  {% if mc_name %}<div class="mc">MC：{{ mc_name }}</div>{% endif %}
+</div>
+
+{% if is_already_signed %}
+<div class="signed-banner">✅ 今日已签到</div>
+{% elif no_reward_reason %}
+<div class="reward-box">
+  <div class="no-reward">{{ no_reward_reason }}</div>
+</div>
+{% else %}
+<div class="reward-box">
+  <div class="label">获得铜钱</div>
+  <span class="amount">+{{ reward }}</span>
+  <span class="info">
+    奖池 {{ pool }} / {{ yesterday_count }} 人
+    {% if bonus_desc %} ｜ 连续加成 {{ bonus_desc }}（基础 {{ base_reward }}）{% endif %}
+  </span>
+</div>
+{% endif %}
+
+<div class="stats">
+  <div class="stat-box">
+    <div class="stat-label">今日签到</div>
+    <div class="stat-value">{{ today_count }} 人</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-label">累计签到</div>
+    <div class="stat-value">{{ total_days }} 天</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-label">连续签到</div>
+    <div class="stat-value">{{ streak }} 天</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-label">最高记录</div>
+    <div class="stat-value">{{ max_streak }} 天</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-label">当前加成</div>
+    <div class="stat-value green">{{ bonus_desc or '无' }}</div>
+  </div>
+</div>
+
+<div class="fortune-box">
+  <div class="fortune-title">🔮 今日占卜</div>
+  <span class="fortune-level level-{{ fortune.level }}">{{ fortune.level }}</span>
+  <span class="fortune-meta">幸运色 {{ fortune.color }} ｜ 幸运数字 {{ fortune.number }}</span>
+  <div class="fortune-msg">「{{ fortune.message }}」</div>
+</div>
+
+</body>
+</html>

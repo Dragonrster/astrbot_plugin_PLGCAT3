@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: "Noto Sans SC", "Microsoft YaHei", "PingFang SC", sans-serif; background: #fff; padding: 16px 20px; }
+
+.title { font-size: 22px; font-weight: bold; color: #333; }
+.sub { font-size: 12px; color: #666; margin-top: 4px; }
+
+table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+th { font-size: 14px; font-weight: bold; padding: 6px 0; text-align: center; }
+th:nth-child(6), th:nth-child(7) { color: #4A90D9; }
+
+td { text-align: center; padding: 2px; }
+.day-cell { width: 56px; height: 48px; margin: 0 auto; border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 16px; font-weight: bold; }
+.day-cell.signed { background: #E8F5E9; border: 2px solid #4CAF50; color: #2E7D32; }
+.day-cell.today { background: #FFF8E1; border: 2px solid #FF9800; color: #E65100; }
+.day-cell.empty { background: #F8F9FA; border: 2px solid #E0E0E0; color: #999; }
+.day-cell.signed .check { font-size: 10px; color: #4CAF50; margin-top: -2px; }
+
+.legend { display: flex; gap: 16px; margin-top: 10px; font-size: 12px; color: #666; }
+.legend-item { display: flex; align-items: center; gap: 4px; }
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; border: 1px solid; }
+.legend-dot.signed { background: #E8F5E9; border-color: #4CAF50; }
+.legend-dot.today { background: #FFF8E1; border-color: #FF9800; }
+.legend-dot.empty { background: #F8F9FA; border-color: #E0E0E0; }
+</style>
+</head>
+<body>
+
+<div class="title">{{ year }} 年 {{ month }} 月  签到日历</div>
+<div class="sub">{{ user_name }} ｜ 本月签到 {{ signed_count }}/{{ total_days }} 天 ｜ 连续 {{ streak }} 天 ｜ 最高 {{ max_streak }} 天</div>
+
+<table>
+  <tr>
+    <th>一</th><th>二</th><th>三</th><th>四</th><th>五</th><th>六</th><th>日</th>
+  </tr>
+  {% for week in weeks %}
+  <tr>
+    {% for day in week %}
+    <td>
+      {% if day.num == 0 %}
+      {% elif day.signed %}
+      <div class="day-cell signed">{{ day.num }}<div class="check">✓</div></div>
+      {% elif day.is_today %}
+      <div class="day-cell today">{{ day.num }}</div>
+      {% else %}
+      <div class="day-cell empty">{{ day.num }}</div>
+      {% endif %}
+    </td>
+    {% endfor %}
+  </tr>
+  {% endfor %}
+</table>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot signed"></div>已签到</div>
+  <div class="legend-item"><div class="legend-dot today"></div>今日</div>
+  <div class="legend-item"><div class="legend-dot empty"></div>未签到</div>
+</div>
+
+</body>
+</html>

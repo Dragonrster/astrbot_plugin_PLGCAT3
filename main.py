@@ -16,6 +16,12 @@ try:
 except ImportError:
     _HAS_PIL = False
 
+try:
+    from jinja2 import Template
+    _HAS_JINJA2 = True
+except ImportError:
+    _HAS_JINJA2 = False
+
 from astrbot.api.event import filter, AstrMessageEvent
 
 try:
@@ -93,6 +99,48 @@ class AsyncRcon:  # 异步RCON类
 
 def strip_mc_color(text: str) -> str:
     return re.sub(r"§.", "", text)
+
+
+_PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _html_to_png(html: str, width: int = 420) -> bytes | None:
+    """将 HTML 渲染为 PNG bytes。优先 playwright，兜底 PIL。"""
+    # 尝试 playwright
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
+            page = browser.new_page(viewport={"width": width, "height": 800})
+            page.set_content(html, wait_until="networkidle")
+            # 自适应高度
+            body_height = page.evaluate("document.body.scrollHeight")
+            page.set_viewport_size({"width": width, "height": body_height + 10})
+            screenshot = page.screenshot(type="png")
+            browser.close()
+            return screenshot
+    except Exception:
+        pass
+    # 尝试 html2image
+    try:
+        from html2image import Html2Image
+        hti = Html2Image(output_path="/tmp", custom_flags=["--no-sandbox", "--disable-gpu"])
+        paths = hti.screenshot(html_str=html, save_as="sign_card.png", size=(width, 800))
+        if paths:
+            with open(paths[0], "rb") as f:
+                return f.read()
+    except Exception:
+        pass
+    return None
+
+
+def _load_template(filename: str) -> str | None:
+    """加载 HTML 模板文件内容。"""
+    path = os.path.join(_PLUGIN_DIR, filename)
+    if os.path.isfile(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    return None
 
 
 _SIGN_CAL_FONT_CACHE: dict[int, "ImageFont.FreeTypeFont | ImageFont.ImageFont"] = {}
@@ -684,7 +732,32 @@ class MyPlugin(Star):
         fortune: dict, no_reward_reason: str = "",
         base_reward: int = 0, bonus_desc: str = "", total_days: int = 0,
     ) -> bytes | None:
-        """生成签到结果卡片图片，返回 PNG bytes。"""
+        """生成签到结果卡片图片，优先 HTML 模板，兜底 PIL。"""
+        is_already_signed = "已签到" in no_reward_reason
+        # 尝试 HTML 模板
+        if _HAS_JINJA2:
+            tpl_html = _load_template("sign_card_template.html")
+            if tpl_html:
+                try:
+                    html = Template(tpl_html).render(
+                        date=time.strftime("%Y-%m-%d"),
+                        user_name=user_name,
+                        mc_name=mcname or "",
+                        is_already_signed=is_already_signed,
+                        no_reward_reason=no_reward_reason if not is_already_signed else "",
+                        reward=reward, pool=pool, yesterday_count=yesterday_count,
+                        base_reward=base_reward, bonus_desc=bonus_desc,
+                        today_count=today_count, total_days=total_days,
+                        streak=streak, max_streak=max_streak,
+                        fortune=fortune,
+                    )
+                    img_bytes = _html_to_png(html, width=420)
+                    if img_bytes:
+                        return img_bytes
+                except Exception as e:
+                    logger.warning(f"[mcsign] HTML 模板渲染失败: {e}")
+
+        # PIL 兜底
         if not _HAS_PIL:
             return None
         font = _get_sign_cal_font(14, self.sign_cal_font_cache_dir, self.sign_cal_font_path)
@@ -695,21 +768,14 @@ class MyPlugin(Star):
         w, h = 420, 500
         img = Image.new("RGB", (w, h), "#FFFFFF")
         draw = ImageDraw.Draw(img)
-
-        # 顶部绿色横幅
         draw.rectangle([0, 0, w, 70], fill="#4CAF50")
         draw.text((20, 18), "每日签到", fill="#FFFFFF", font=font_title)
-        today_str = time.strftime("%Y-%m-%d")
-        draw.text((w - 130, 24), today_str, fill="#E8F5E9", font=font)
-
+        draw.text((w - 130, 24), time.strftime("%Y-%m-%d"), fill="#E8F5E9", font=font)
         y = 85
-        # 用户名
         draw.text((20, y), f"玩家：{user_name}", fill="#333333", font=font_title)
         if mcname:
-            draw.text((20, y + 30), f"{mcname}", fill="#666666", font=font)
+            draw.text((20, y + 30), mcname, fill="#666666", font=font)
         y += 65
-
-        # 铜钱奖励区域
         draw.rectangle([15, y, w - 15, y + 80], fill="#FFF8E1", outline="#FFB74D", width=2)
         if no_reward_reason:
             draw.text((30, y + 10), no_reward_reason, fill="#999999", font=font)
@@ -724,143 +790,114 @@ class MyPlugin(Star):
         else:
             draw.text((30, y + 20), "昨日无人签到，今日无奖励", fill="#999999", font=font)
         y += 95
-
-        # 统计数据
         bonus_pct = bonus_desc if bonus_desc else "无"
-        stats = [
-            ("今日签到", f"{today_count} 人"),
-            ("累计签到", f"{total_days} 天"),
-            ("连续签到", f"{streak} 天"),
-            ("最高记录", f"{max_streak} 天"),
-            ("收益加成", bonus_pct),
-        ]
+        stats = [("今日签到", f"{today_count} 人"), ("累计签到", f"{total_days} 天"), ("连续签到", f"{streak} 天"), ("最高记录", f"{max_streak} 天"), ("收益加成", bonus_pct)]
         col_w = (w - 40) // 5
         for i, (label, val) in enumerate(stats):
             cx = 20 + i * col_w
             draw.rectangle([cx, y, cx + col_w - 6, y + 55], fill="#F5F5F5", outline="#E0E0E0", width=1)
             draw.text((cx + 8, y + 6), label, fill="#999999", font=font)
-            val_color = "#4CAF50" if bonus_desc and i == 3 else "#333333"
-            draw.text((cx + 8, y + 26), val, fill=val_color, font=font_title)
+            draw.text((cx + 8, y + 26), val, fill="#4CAF50" if i == 4 else "#333333", font=font_title)
         y += 70
-
-        # 占卜区域
         draw.rectangle([15, y, w - 15, y + 150], fill="#F3E5F5", outline="#CE93D8", width=2)
         draw.text((30, y + 10), "今日占卜", fill="#7B1FA2", font=font_title)
-        level = fortune["level"]
         level_colors = {"大吉": "#D32F2F", "中吉": "#F57C00", "小吉": "#FBC02D", "吉": "#388E3C", "末吉": "#1976D2", "凶": "#616161"}
-        draw.text((30, y + 40), level, fill=level_colors.get(level, "#333333"), font=font_fortune)
+        draw.text((30, y + 40), fortune["level"], fill=level_colors.get(fortune["level"], "#333333"), font=font_fortune)
         draw.text((30 + 100, y + 48), f"  幸运色 {fortune['color']}  |  幸运数字 {fortune['number']}", fill="#666666", font=font)
-        # 签文自动换行
         msg = fortune["message"]
-        line = ""
-        msg_y = y + 85
+        line, msg_y = "", y + 85
         for ch in msg:
             line += ch
             bbox = draw.textbbox((0, 0), line, font=font_title)
             if bbox[2] - bbox[0] > w - 80:
                 draw.text((30, msg_y), line, fill="#333333", font=font_title)
-                msg_y += 28
-                line = ""
+                msg_y += 28; line = ""
         if line:
             draw.text((30, msg_y), line, fill="#333333", font=font_title)
-
         buf = io.BytesIO()
         img.save(buf, format="PNG", optimize=True)
         return buf.getvalue()
 
     def _generate_sign_calendar(self, qqid: str, user_name: str, year: int = None, month: int = None) -> bytes | None:
-        """生成签到日历图片，返回 PNG bytes。需要 Pillow。"""
-        if not _HAS_PIL:
-            return None
+        """生成签到日历图片，优先 HTML 模板，兜底 PIL。"""
         now = datetime.now()
         year = year or now.year
         month = month or now.month
         today_day = now.day if (year == now.year and month == now.month) else -1
-
-        # 统计本月签到天数
-        cal = calendar.monthcalendar(year, month)
         total_days_in_month = calendar.monthrange(year, month)[1]
         signed_days = set()
         for d in range(1, total_days_in_month + 1):
             ds = f"{year}-{month:02d}-{d:02d}"
             if qqid in self._get_all_signed_qqids(ds):
                 signed_days.add(d)
+        streak = self._sign_consecutive_days(qqid)
+        max_streak = self._sign_max_consecutive_days(qqid)
+        cal = calendar.monthcalendar(year, month)
 
-        # 字体
+        # 尝试 HTML 模板
+        if _HAS_JINJA2:
+            tpl_html = _load_template("sign_cal_template.html")
+            if tpl_html:
+                try:
+                    weeks = []
+                    for week in cal:
+                        week_data = []
+                        for day in week:
+                            week_data.append({
+                                "num": day,
+                                "signed": day in signed_days,
+                                "is_today": day == today_day,
+                            })
+                        weeks.append(week_data)
+                    html = Template(tpl_html).render(
+                        year=year, month=month, user_name=user_name,
+                        signed_count=len(signed_days), total_days=total_days_in_month,
+                        streak=streak, max_streak=max_streak, weeks=weeks,
+                    )
+                    img_bytes = _html_to_png(html, width=460)
+                    if img_bytes:
+                        return img_bytes
+                except Exception as e:
+                    logger.warning(f"[mcsigncal] HTML 日历渲染失败: {e}")
+
+        # PIL 兜底
+        if not _HAS_PIL:
+            return None
         font = _get_sign_cal_font(14, self.sign_cal_font_cache_dir, self.sign_cal_font_path)
         font_title = _get_sign_cal_font(24, self.sign_cal_font_cache_dir, self.sign_cal_font_path)
         font_day = _get_sign_cal_font(20, self.sign_cal_font_cache_dir, self.sign_cal_font_path)
-
         cell_w, cell_h = 64, 56
-        cols = 7
         rows = len(cal)
-        header_h = 60
-        legend_h = 30
         pad_x, pad_y = 20, 10
-        img_w = pad_x * 2 + cell_w * cols
-        img_h = pad_y * 2 + header_h + 30 + cell_h * rows + legend_h
-
+        img_w = pad_x * 2 + cell_w * 7
+        img_h = pad_y * 2 + 60 + 30 + cell_h * rows + 30
         img = Image.new("RGB", (img_w, img_h), "#FFFFFF")
         draw = ImageDraw.Draw(img)
-
-        # 标题
-        title = f"{year} 年 {month} 月  签到日历"
-        draw.text((pad_x, pad_y), title, fill="#333333", font=font_title)
-
-        # 副标题
-        sub = f"{user_name}  |  本月签到 {len(signed_days)}/{total_days_in_month} 天  |  连续 {self._sign_consecutive_days(qqid)} 天  |  最高 {self._sign_max_consecutive_days(qqid)} 天"
-        draw.text((pad_x, pad_y + 30), sub, fill="#666666", font=font)
-
-        # 星期头
-        week_names = ["一", "二", "三", "四", "五", "六", "日"]
-        week_colors = ["#333333"] * 5 + ["#4A90D9"] * 2
-        y_start = pad_y + header_h
-        for col, (name, color) in enumerate(zip(week_names, week_colors)):
-            x = pad_x + col * cell_w + cell_w // 2 - 6
-            draw.text((x, y_start), name, fill=color, font=font_day)
-
-        # 日历格子
+        draw.text((pad_x, pad_y), f"{year} 年 {month} 月  签到日历", fill="#333333", font=font_title)
+        draw.text((pad_x, pad_y + 30), f"{user_name}  |  本月签到 {len(signed_days)}/{total_days_in_month} 天  |  连续 {streak} 天  |  最高 {max_streak} 天", fill="#666666", font=font)
+        y_start = pad_y + 60
+        for col, (name, color) in enumerate(zip("一二三四五六日", ["#333333"] * 5 + ["#4A90D9"] * 2)):
+            draw.text((pad_x + col * cell_w + cell_w // 2 - 6, y_start), name, fill=color, font=font_day)
         grid_top = y_start + 30
         for row_idx, week in enumerate(cal):
             for col_idx, day in enumerate(week):
                 x = pad_x + col_idx * cell_w
                 y = grid_top + row_idx * cell_h
-                if day == 0:
-                    continue
-                # 背景色
-                if day in signed_days:
-                    bg = "#E8F5E9"
-                    border = "#4CAF50"
-                    text_fill = "#2E7D32"
-                elif day == today_day:
-                    bg = "#FFF8E1"
-                    border = "#FF9800"
-                    text_fill = "#E65100"
-                else:
-                    bg = "#F8F9FA"
-                    border = "#E0E0E0"
-                    text_fill = "#999999"
+                if day == 0: continue
+                if day in signed_days: bg, border, text_fill = "#E8F5E9", "#4CAF50", "#2E7D32"
+                elif day == today_day: bg, border, text_fill = "#FFF8E1", "#FF9800", "#E65100"
+                else: bg, border, text_fill = "#F8F9FA", "#E0E0E0", "#999999"
                 draw.rectangle([x + 1, y + 1, x + cell_w - 2, y + cell_h - 2], fill=bg, outline=border, width=2)
-                # 日期数字
                 day_str = str(day)
                 bbox = draw.textbbox((0, 0), day_str, font=font_day)
-                tw = bbox[2] - bbox[0]
-                th = bbox[3] - bbox[1]
-                draw.text((x + cell_w // 2 - tw // 2, y + 8), day_str, fill=text_fill, font=font_day)
-                # 签到勾号
+                draw.text((x + cell_w // 2 - (bbox[2] - bbox[0]) // 2, y + 8), day_str, fill=text_fill, font=font_day)
                 if day in signed_days:
-                    check = "✓"
-                    draw.text((x + cell_w // 2 - 5, y + cell_h - 18), check, fill="#4CAF50", font=font)
-
-        # 图例
+                    draw.text((x + cell_w // 2 - 5, y + cell_h - 18), "✓", fill="#4CAF50", font=font)
         ly = grid_top + rows * cell_h + 6
-        draw.rectangle([pad_x, ly, pad_x + 14, ly + 14], fill="#E8F5E9", outline="#4CAF50")
-        draw.text((pad_x + 18, ly - 1), "已签到", fill="#333333", font=font)
-        draw.rectangle([pad_x + 80, ly, pad_x + 94, ly + 14], fill="#FFF8E1", outline="#FF9800")
-        draw.text((pad_x + 98, ly - 1), "今日", fill="#333333", font=font)
-        draw.rectangle([pad_x + 146, ly, pad_x + 160, ly + 14], fill="#F8F9FA", outline="#E0E0E0")
-        draw.text((pad_x + 164, ly - 1), "未签到", fill="#999999", font=font)
-
+        for i, (label, bg, border) in enumerate([("已签到", "#E8F5E9", "#4CAF50"), ("今日", "#FFF8E1", "#FF9800"), ("未签到", "#F8F9FA", "#E0E0E0")]):
+            bx = pad_x + i * 80
+            draw.rectangle([bx, ly, bx + 14, ly + 14], fill=bg, outline=border)
+            draw.text((bx + 18, ly - 1), label, fill="#333333" if i < 2 else "#999999", font=font)
         buf = io.BytesIO()
         img.save(buf, format="PNG", optimize=True)
         return buf.getvalue()
