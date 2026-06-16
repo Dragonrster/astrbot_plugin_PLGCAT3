@@ -1321,6 +1321,7 @@ class MyPlugin(Star):
                 f"  /mcsign  每日签到+占卜（{sign}，mcqd）",
                 "  /mcsigncal  签到日历（mcsigncalendar）",
                 "  /mcsignback [日期]  补签（mcbq）",
+                "  /mcprofile [@某人]  玩家名片（mcpf）",
                 "  [管] /mcsignadmin  签到数据管理（msa）",
                 "  /mcmoney  查询铜钱（mcqian）",
                 "  /mctransfer <游戏ID> <数量>  转账（mczz）",
@@ -2204,6 +2205,78 @@ class MyPlugin(Star):
         yield event.plain_result(
             f"{sender_mc} → {receiver_mc}：{amount} 铜钱{new_balance_str}"
         )
+
+    @filter.command("mcprofile", desc="玩家名片", alias={"mcpf"})
+    async def mcprofile(self, event: AstrMessageEvent):
+        qqid = str(event.get_sender_id())
+        qq_name = event.get_sender_name()
+        raw = self._tail_after_command_names(event, "mcprofile", "mcpf")
+        raw = raw.strip().lstrip("@")
+        # 解析目标 QQ
+        if raw:
+            target_qq = self._resolve_at_qq(raw, event)
+            if not target_qq:
+                target_qq = raw if raw.isdigit() else ""
+            if target_qq:
+                target_qq_name = ""
+                # 尝试从消息链获取昵称
+                if hasattr(event, "message_obj") and hasattr(event.message_obj, "message"):
+                    for seg in event.message_obj.message:
+                        if str(getattr(seg, "type", "")).lower() in ("at",):
+                            target_qq_name = getattr(seg, "name", "") or ""
+                            break
+                qqid = target_qq
+                qq_name = target_qq_name or f"QQ:{target_qq}"
+        else:
+            target_qq = qqid
+        # 获取绑定信息
+        bound = self.apply_data.get(qqid, [])
+        mc_name = bound[0] if bound else None
+        # 签到数据
+        today = time.strftime("%Y-%m-%d")
+        total_days = self._get_total_sign_days(qqid)
+        streak = self._sign_consecutive_days(qqid)
+        max_streak = self._sign_max_consecutive_days(qqid)
+        _, bonus_desc = self._sign_bonus_multiplier(streak)
+        fortune = self._generate_fortune(qqid, today)
+        # 在线状态
+        is_online = False
+        if mc_name:
+            try:
+                status = await mc_server_list_ping(self.rcon_host, self.mc_server_port)
+                sample = status.get("players", {}).get("sample", []) or []
+                online_names = {p.get("name", "").lower() for p in sample}
+                is_online = mc_name.lower() in online_names
+            except Exception:
+                pass
+        # 渲染 HTML
+        if _HAS_JINJA2:
+            tpl_html = _load_template("profile_template.html")
+            if tpl_html:
+                try:
+                    html = Template(tpl_html).render(
+                        qq_name=qq_name, qq_id=qqid,
+                        mc_name=mc_name, is_online=is_online,
+                        total_days=total_days, streak=streak,
+                        max_streak=max_streak, bonus_desc=bonus_desc,
+                        fortune=fortune,
+                    )
+                    img_bytes = _html_to_png(html, width=420)
+                    if img_bytes:
+                        import base64
+                        yield event.make_result().base64_image(base64.b64encode(img_bytes).decode())
+                        return
+                except Exception as e:
+                    logger.warning(f"[mcprofile] HTML 渲染失败: {e}")
+        # 文本兜底
+        lines = [f"═══ {qq_name} 的名片 ═══"]
+        if mc_name:
+            lines.append(f"MC：{mc_name}  {'🟢 在线' if is_online else '⚪ 离线'}")
+        else:
+            lines.append("MC：未绑定")
+        lines.append(f"累计 {total_days} 天 | 连续 {streak} 天 | 最高 {max_streak} 天 | 加成 {bonus_desc or '无'}")
+        lines.append(f"占卜：{fortune['level']}  {fortune['message']}")
+        yield event.plain_result("\n".join(lines))
 
     @filter.command("mckill", desc="MC kill人")
     async def mckill(self, event: AstrMessageEvent, mcname: str = ""):
