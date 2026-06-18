@@ -1297,6 +1297,7 @@ class MyPlugin(Star):
                 "  /wantwl <游戏ID>  申请绑定（私聊）",
                 "  /wantwllist  查看绑定（wantwll）",
                 "  /wantwlunbind <游戏ID>  解绑（wantwlu）",
+                "  /mcmainsign [游戏ID]  切换主收款账号（mcmain）",
                 "",
                 "【封禁】",
                 "  [管] /mcban <游戏ID> [原因]  封禁",
@@ -1584,6 +1585,36 @@ class MyPlugin(Star):
         except Exception as e:
             yield event.plain_result(f"解绑失败：{e}")
 
+    @filter.command("mcmainsign", desc="切换主收款账号", alias={"mcmain", "mcswitch"})
+    async def mcmainsign(self, event: AstrMessageEvent, mcname: str = ""):
+        if not self.enable_apply_whitelist:
+            yield event.plain_result("抱歉，白名单申请功能未开启。")
+            return
+        qqid = str(event.get_sender_id())
+        bound = self.apply_data.get(qqid, [])
+        if not bound:
+            yield event.plain_result("你还没有绑定MC账号，请先使用 /wantwl <游戏ID> 绑定。")
+            return
+        if not mcname:
+            lines = [f"当前绑定列表（第1位为主收款账号）："]
+            for i, name in enumerate(bound):
+                tag = " ← 主账号" if i == 0 else ""
+                lines.append(f"  {i + 1}. {name}{tag}")
+            lines.append("")
+            lines.append("用法：/mcmainsign <游戏ID>  切换主账号")
+            yield event.plain_result("\n".join(lines))
+            return
+        if mcname not in bound:
+            yield event.plain_result(f"你没有绑定过MC账号 {mcname}。")
+            return
+        if bound[0] == mcname:
+            yield event.plain_result(f"{mcname} 已经是主收款账号了。")
+            return
+        bound.remove(mcname)
+        bound.insert(0, mcname)
+        self._save_apply_data()
+        yield event.plain_result(f"已切换主收款账号为 {mcname}。\n当前绑定：{'、'.join(bound)}")
+
     @filter.command("mcsign", desc="每日签到领铜钱", alias={"mcqd"})
     async def mcsign(self, event: AstrMessageEvent):
         if not self.enable_sign:
@@ -1643,15 +1674,7 @@ class MyPlugin(Star):
         elif qqid not in yesterday_signers_only:
             no_reward_reason = "昨日未签到，无法领取今日奖励"
         elif yesterday_count > 0:
-            # 奖池每天固定一次，所有人共享
-            today_pool_key = f"{today}_pool"
-            saved_pool = self.sign_data.get(today_pool_key)
-            if isinstance(saved_pool, (int, float)):
-                pool = int(saved_pool)
-            else:
-                pool = random.randint(self.sign_money_min, self.sign_money_max)
-                self.sign_data[today_pool_key] = pool
-                self._save_sign_data()
+            pool = random.randint(self.sign_money_min, self.sign_money_max)
             base_reward = pool // yesterday_count
             if base_reward > 0:
                 reward = int(base_reward * bonus_mult)
