@@ -2363,7 +2363,8 @@ class MyPlugin(Star):
         if stats is None:
             yield event.plain_result(f"未找到 {mcname} 的统计数据（UUID: {mc_offline_uuid(mcname)}）。")
             return
-        await self._send_stats_result(event, mcname, stats)
+        async for msg in self._send_stats_result(event, mcname, stats):
+            yield msg
 
     async def _send_stats_result(self, event: AstrMessageEvent, mcname: str, stats: dict):
         """解析并发送玩家统计数据。"""
