@@ -120,20 +120,22 @@ def mc_offline_uuid(name: str) -> str:
 async def mcsm_read_file(panel_url: str, api_key: str, instance_uuid: str, daemon_uuid: str, file_path: str) -> str | None:
     """通过 MCSM 面板 API 读取服务器文件内容。"""
     import urllib.request
-    import urllib.parse
     url = (
-        f"{panel_url}/api/protected_instance/file"
-        f"?apikey={api_key}"
+        f"{panel_url}/api/files/"
+        f"?daemonId={daemon_uuid}"
         f"&uuid={instance_uuid}"
-        f"&daemonId={daemon_uuid}"
-        f"&file={urllib.parse.quote(file_path, safe='')}"
     )
+    body = json.dumps({"target": file_path}).encode("utf-8")
     try:
-        req = urllib.request.Request(url)
+        req = urllib.request.Request(
+            url, data=body, method="PUT",
+            headers={"Content-Type": "application/json", "Authorization": api_key},
+        )
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             if data.get("status") == 200:
                 return data.get("data", "")
+            logger.warning(f"[mcsm_read_file] API 返回: {data}")
     except Exception as e:
         logger.warning(f"[mcsm_read_file] 读取失败: {file_path} -> {e}")
     return None
@@ -2291,7 +2293,7 @@ class MyPlugin(Star):
     async def _get_player_stats(self, mcname: str) -> dict | None:
         """读取玩家统计 JSON，优先本地文件，兜底 MCSM API。"""
         uuid = mc_offline_uuid(mcname)
-        stats_file = f"world/stats/{uuid}.json"
+        stats_file = f"/world/stats/{uuid}.json"
         # 方式1：本地文件
         local_path = self.mc_stats_world_path
         if local_path:
