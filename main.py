@@ -2321,16 +2321,18 @@ class MyPlugin(Star):
 
     @staticmethod
     def _fmt_ticks(ticks: int) -> str:
-        """将游戏刻转换为可读时间。1秒=20刻。"""
+        """将游戏刻转换为可读时间。1秒=20刻。输出格式：x天x小时(xxx.xh)"""
         total_sec = ticks // 20
+        total_hours = total_sec / 3600
         days = total_sec // 86400
         hours = (total_sec % 86400) // 3600
-        mins = (total_sec % 3600) // 60
+        parts = []
         if days > 0:
-            return f"{days}天{hours}小时{mins}分"
+            parts.append(f"{days}天")
         if hours > 0:
-            return f"{hours}小时{mins}分"
-        return f"{mins}分"
+            parts.append(f"{hours}小时")
+        readable = "".join(parts) if parts else "0小时"
+        return f"{readable}({total_hours:.1f}h)"
 
     @filter.command("mcstats", desc="玩家游戏统计", alias={"mcstat"})
     async def mcstats(self, event: AstrMessageEvent):
@@ -2386,13 +2388,12 @@ class MyPlugin(Star):
         # 钓鱼
         fished = custom.get("minecraft:custom", {}).get("minecraft:fish_caught", 0)
         lines = [
-            f"═══ {mcname} 的游戏统计 ═══",
-            f"🎮 游戏时长：{playtime}",
-            f"💀 死亡次数：{deaths}",
-            f"⚔️ 击杀生物：{kills}  |  击杀玩家：{player_kills}",
-            f"🚶 移动距离：{walk_km:.1f} km",
-            f"⛏️ 挖掘方块：{mined}  |  合成物品：{crafted}  |  用坏工具：{broken}",
-            f"🎣 钓鱼数量：{fished}",
+            f"{mcname} 的统计",
+            f" 游戏时长：{playtime}",
+            f" 死亡次数：{deaths}",
+            f" 击杀数：{kills}",
+            f" 移动距离：{walk_km:.1f} km",
+            f" 捕鱼数：{fished}",
         ]
         # 尝试图片
         if _HAS_JINJA2:
