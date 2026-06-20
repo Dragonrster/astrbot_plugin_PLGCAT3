@@ -1,0 +1,2 @@
+/setblock 
+186 64 58 minecraft:dropper[facing=up,triggered=false]{Items:[{Slot:4b,components:{"minecraft:custom_data":{PublicBukkitValues:{"equipment_att:item_id":"rs_carp"}},"minecraft:custom_model_data":20,"minecraft:custom_name":'{"translate":"pl.item.name.rs_carp"}',"minecraft:lore":['{"translate":"pl.item.lore.rs_carpa"}','{"translate":"pl.item.lore.rs_carpb"}','{"translate":"pl.item.lore.rs_carpc"}','{"translate":"pl.item.lore.rs_carpd"}']},count:1,id:"minecraft:golden_apple"}]}

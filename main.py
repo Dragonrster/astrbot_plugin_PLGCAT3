@@ -101,6 +101,44 @@ def strip_mc_color(text: str) -> str:
     return re.sub(r"§.", "", text)
 
 
+def mc_offline_uuid(name: str) -> str:
+    """计算离线模式玩家 UUID（OfflinePlayer:{name} 的 MD5 v3 UUID）。"""
+    import hashlib
+    md5 = hashlib.md5(("OfflinePlayer:" + name).encode("utf-8")).digest()
+    b = bytearray(md5)
+    b[6] = (b[6] & 0x0F) | 0x30  # version 3
+    b[8] = (b[8] & 0x3F) | 0x80  # variant
+    return "%08x-%04x-%04x-%04x-%012x" % (
+        int.from_bytes(b[0:4], "big"),
+        int.from_bytes(b[4:6], "big"),
+        int.from_bytes(b[6:8], "big"),
+        int.from_bytes(b[8:10], "big"),
+        int.from_bytes(b[10:16], "big"),
+    )
+
+
+async def mcsm_read_file(panel_url: str, api_key: str, instance_uuid: str, daemon_uuid: str, file_path: str) -> str | None:
+    """通过 MCSM 面板 API 读取服务器文件内容。"""
+    import urllib.request
+    import urllib.parse
+    url = (
+        f"{panel_url}/api/protected_instance/file"
+        f"?apikey={api_key}"
+        f"&uuid={instance_uuid}"
+        f"&daemonId={daemon_uuid}"
+        f"&file={urllib.parse.quote(file_path, safe='')}"
+    )
+    try:
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if data.get("status") == 200:
+                return data.get("data", "")
+    except Exception as e:
+        logger.warning(f"[mcsm_read_file] 读取失败: {file_path} -> {e}")
+    return None
+
+
 _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -421,6 +459,8 @@ class MyPlugin(Star):
         self._mc_chat_file_pos = [0]
         self._mc_chat_first_boot = [True]
         self._mc_chat_rate: defaultdict[str, deque[float]] = defaultdict(deque)
+        # 玩家统计查询
+        self.mc_stats_world_path = str(self.config.get("mc_stats_world_path", "") or "").strip()
 
     def _load_mc_chat_target_from_file(self):
         if not os.path.isfile(self.mc_chat_target_file):
@@ -1297,7 +1337,8 @@ class MyPlugin(Star):
                 "  /wantwl <游戏ID>  申请绑定（私聊）",
                 "  /wantwllist  查看绑定（wantwll）",
                 "  /wantwlunbind <游戏ID>  解绑（wantwlu）",
-                "  /mcmainsign [游戏ID]  切换主收款账号（mcmain）",
+                "  /mcmainsign [游戏ID]  切换主游戏账号（mcmain）",
+                "  /mcstats [@某人]  游戏统计（mcstat）",
                 "",
                 "【封禁】",
                 "  [管] /mcban <游戏ID> [原因]  封禁",
@@ -1585,7 +1626,7 @@ class MyPlugin(Star):
         except Exception as e:
             yield event.plain_result(f"解绑失败：{e}")
 
-    @filter.command("mcmainsign", desc="切换主收款账号", alias={"mcmain", "mcswitch"})
+    @filter.command("mcmainsign", desc="切换主游戏账号", alias={"mcmain", "mcswitch"})
     async def mcmainsign(self, event: AstrMessageEvent, mcname: str = ""):
         if not self.enable_apply_whitelist:
             yield event.plain_result("抱歉，白名单申请功能未开启。")
@@ -1596,7 +1637,7 @@ class MyPlugin(Star):
             yield event.plain_result("你还没有绑定MC账号，请先使用 /wantwl <游戏ID> 绑定。")
             return
         if not mcname:
-            lines = [f"当前绑定列表（第1位为主收款账号）："]
+            lines = [f"当前绑定列表（第1位为主游戏账号）："]
             for i, name in enumerate(bound):
                 tag = " ← 主账号" if i == 0 else ""
                 lines.append(f"  {i + 1}. {name}{tag}")
@@ -1608,12 +1649,12 @@ class MyPlugin(Star):
             yield event.plain_result(f"你没有绑定过MC账号 {mcname}。")
             return
         if bound[0] == mcname:
-            yield event.plain_result(f"{mcname} 已经是主收款账号了。")
+            yield event.plain_result(f"{mcname} 已经是主游戏账号了。")
             return
         bound.remove(mcname)
         bound.insert(0, mcname)
         self._save_apply_data()
-        yield event.plain_result(f"已切换主收款账号为 {mcname}。\n当前绑定：{'、'.join(bound)}")
+        yield event.plain_result(f"已切换主游戏账号为 {mcname}。\n当前绑定：{'、'.join(bound)}")
 
     @filter.command("mcsign", desc="每日签到领铜钱", alias={"mcqd"})
     async def mcsign(self, event: AstrMessageEvent):
@@ -2159,10 +2200,10 @@ class MyPlugin(Star):
             receiver_resp = await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, receiver_get_cmd)
             receiver_resp_clean = strip_mc_color(receiver_resp).strip()
             if not receiver_resp_clean or not re.findall(r"[-+]?\d+(?:\.\d+)?", receiver_resp_clean):
-                yield event.plain_result(f"收款方 {receiver_mc} 账户不存在或无法查询，转账已取消。")
+                yield event.plain_result(f"对方 {receiver_mc} 账户不存在或无法查询，转账已取消。")
                 return
         except Exception as e:
-            yield event.plain_result(f"查询收款方账户失败：{e}，转账已取消。")
+            yield event.plain_result(f"查询对方账户失败：{e}，转账已取消。")
             return
         # 查询发送方余额
         get_cmd = f"{self.money_command_prefix} get {sender_mc}"
@@ -2246,6 +2287,129 @@ class MyPlugin(Star):
         command = f"plugins".strip()
         async for msg in self.execute_and_reply(event, command, "插件列表"):
             yield msg
+
+    async def _get_player_stats(self, mcname: str) -> dict | None:
+        """读取玩家统计 JSON，优先本地文件，兜底 MCSM API。"""
+        uuid = mc_offline_uuid(mcname)
+        stats_file = f"world/stats/{uuid}.json"
+        # 方式1：本地文件
+        local_path = self.mc_stats_world_path
+        if local_path:
+            full_path = os.path.join(local_path, "stats", f"{uuid}.json")
+            if os.path.isfile(full_path):
+                try:
+                    with open(full_path, "r", encoding="utf-8") as f:
+                        return json.load(f)
+                except Exception as e:
+                    logger.warning(f"[mcstats] 本地读取失败: {full_path} -> {e}")
+        # 方式2：MCSM API
+        if self.mcsm_panel_url and self.mcsm_api_key:
+            content = await mcsm_read_file(
+                self.mcsm_panel_url, self.mcsm_api_key,
+                self.mcsm_instance_uuid, self.mcsm_daemon_uuid,
+                stats_file,
+            )
+            if content:
+                try:
+                    return json.loads(content)
+                except Exception as e:
+                    logger.warning(f"[mcstats] MCSM JSON 解析失败: {e}")
+        return None
+
+    @staticmethod
+    def _fmt_ticks(ticks: int) -> str:
+        """将游戏刻转换为可读时间。1秒=20刻。"""
+        total_sec = ticks // 20
+        days = total_sec // 86400
+        hours = (total_sec % 86400) // 3600
+        mins = (total_sec % 3600) // 60
+        if days > 0:
+            return f"{days}天{hours}小时{mins}分"
+        if hours > 0:
+            return f"{hours}小时{mins}分"
+        return f"{mins}分"
+
+    @filter.command("mcstats", desc="玩家游戏统计", alias={"mcstat"})
+    async def mcstats(self, event: AstrMessageEvent):
+        qqid = str(event.get_sender_id())
+        raw = self._tail_after_command_names(event, "mcstats", "mcstat")
+        raw = raw.strip().lstrip("@")
+        # 解析目标
+        target_qq = qqid
+        if raw:
+            at_qq = self._resolve_at_qq(raw, event)
+            if at_qq:
+                target_qq = at_qq
+            elif not raw.isdigit():
+                # 直接输入 MC 名（管理员）
+                if not self.is_admin(qqid):
+                    yield event.plain_result("只有管理员可以直接查询他人。")
+                    return
+                stats = await self._get_player_stats(raw)
+                if stats is None:
+                    yield event.plain_result(f"未找到玩家 {raw} 的统计数据。")
+                    return
+                await self._send_stats_result(event, raw, stats)
+                return
+        bound = self.apply_data.get(target_qq, [])
+        if not bound:
+            yield event.plain_result("该用户未绑定MC账号。")
+            return
+        mcname = bound[0]
+        stats = await self._get_player_stats(mcname)
+        if stats is None:
+            yield event.plain_result(f"未找到 {mcname} 的统计数据（UUID: {mc_offline_uuid(mcname)}）。")
+            return
+        await self._send_stats_result(event, mcname, stats)
+
+    async def _send_stats_result(self, event: AstrMessageEvent, mcname: str, stats: dict):
+        """解析并发送玩家统计数据。"""
+        custom = stats.get("stats", {})
+        # 游戏时长
+        playtime_ticks = custom.get("minecraft:custom", {}).get("minecraft:total_world_time", 0)
+        playtime = self._fmt_ticks(playtime_ticks)
+        # 击杀/死亡
+        kills = custom.get("minecraft:custom", {}).get("minecraft:mob_kills", 0)
+        deaths = custom.get("minecraft:custom", {}).get("minecraft:deaths", 0)
+        player_kills = custom.get("minecraft:custom", {}).get("minecraft:player_kills", 0)
+        # 采集
+        mined = sum(custom.get("minecraft:mined", {}).values())
+        crafted = sum(custom.get("minecraft:crafted", {}).values())
+        broken = sum(custom.get("minecraft:broken", {}).values())
+        # 移动距离
+        walk_cm = custom.get("minecraft:custom", {}).get("minecraft:walk_one_cm", 0)
+        walk_km = walk_cm / 100000
+        # 钓鱼
+        fished = custom.get("minecraft:custom", {}).get("minecraft:fish_caught", 0)
+        lines = [
+            f"═══ {mcname} 的游戏统计 ═══",
+            f"🎮 游戏时长：{playtime}",
+            f"💀 死亡次数：{deaths}",
+            f"⚔️ 击杀生物：{kills}  |  击杀玩家：{player_kills}",
+            f"🚶 移动距离：{walk_km:.1f} km",
+            f"⛏️ 挖掘方块：{mined}  |  合成物品：{crafted}  |  用坏工具：{broken}",
+            f"🎣 钓鱼数量：{fished}",
+        ]
+        # 尝试图片
+        if _HAS_JINJA2:
+            tpl_html = _load_template("stats_template.html")
+            if tpl_html:
+                try:
+                    html = Template(tpl_html).render(
+                        mcname=mcname, uuid=mc_offline_uuid(mcname),
+                        playtime=playtime, deaths=deaths, kills=kills,
+                        player_kills=player_kills, walk_km=walk_km,
+                        mined=mined, crafted=crafted, broken=broken,
+                        fished=fished,
+                    )
+                    img_bytes = await _html_to_png(html, width=420)
+                    if img_bytes:
+                        import base64
+                        yield event.make_result().base64_image(base64.b64encode(img_bytes).decode())
+                        return
+                except Exception as e:
+                    logger.warning(f"[mcstats] 图片渲染失败: {e}")
+        yield event.plain_result("\n".join(lines))
 
     @filter.command("mcentitylist", desc="Paper 实体列表", alias={"mcel"})
     async def mcentitylist(

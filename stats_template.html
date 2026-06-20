@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: "Noto Sans SC", "Microsoft YaHei", "PingFang SC", "WenQuanYi Zen Hei", sans-serif; width: 420px; background: #fff; }
+
+.header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); padding: 18px 20px; border-radius: 12px 12px 0 0; }
+.header .name { font-size: 22px; font-weight: bold; color: #e94560; }
+.header .uuid { font-size: 10px; color: #666; margin-top: 2px; font-family: monospace; }
+
+.stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; padding: 16px; }
+.stat-card { background: #f8f9fa; border-radius: 10px; padding: 14px; border-left: 4px solid; }
+.stat-card .icon { font-size: 24px; }
+.stat-card .label { font-size: 12px; color: #888; margin-top: 4px; }
+.stat-card .value { font-size: 20px; font-weight: bold; color: #333; margin-top: 2px; }
+
+.c-time { border-color: #4CAF50; }
+.c-death { border-color: #f44336; }
+.c-kill { border-color: #FF9800; }
+.c-walk { border-color: #2196F3; }
+.c-mine { border-color: #9C27B0; }
+.c-fish { border-color: #00BCD4; }
+
+.footer { text-align: center; padding: 8px; font-size: 10px; color: #bbb; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="name">{{ mcname }}</div>
+  <div class="uuid">UUID: {{ uuid }}</div>
+</div>
+
+<div class="stats-grid">
+  <div class="stat-card c-time">
+    <div class="icon">🎮</div>
+    <div class="label">游戏时长</div>
+    <div class="value">{{ playtime }}</div>
+  </div>
+  <div class="stat-card c-death">
+    <div class="icon">💀</div>
+    <div class="label">死亡次数</div>
+    <div class="value">{{ deaths }}</div>
+  </div>
+  <div class="stat-card c-kill">
+    <div class="icon">⚔️</div>
+    <div class="label">击杀</div>
+    <div class="value">{{ kills }} 生物 / {{ player_kills }} 玩家</div>
+  </div>
+  <div class="stat-card c-walk">
+    <div class="icon">🚶</div>
+    <div class="label">移动距离</div>
+    <div class="value">{{ "%.1f"|format(walk_km) }} km</div>
+  </div>
+  <div class="stat-card c-mine">
+    <div class="icon">⛏️</div>
+    <div class="label">挖掘 / 合成 / 损坏</div>
+    <div class="value">{{ mined }} / {{ crafted }} / {{ broken }}</div>
+  </div>
+  <div class="stat-card c-fish">
+    <div class="icon">🎣</div>
+    <div class="label">钓鱼数量</div>
+    <div class="value">{{ fished }}</div>
+  </div>
+</div>
+
+<div class="footer">数据来源：world/stats/*.json</div>
+
+</body>
+</html>

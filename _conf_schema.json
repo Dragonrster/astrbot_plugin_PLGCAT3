@@ -150,5 +150,11 @@
     "description": "MCSM 守护进程 UUID（节点管理页面可见）",
     "type": "string",
     "default": ""
+  },
+  "mc_stats_world_path": {
+    "description": "MC 服务器 world 目录绝对路径（用于读取玩家统计 stats/*.json），留空则通过 MCSM API 读取",
+    "type": "string",
+    "default": "",
+    "hint": "例如 /mc_server/world，需与 AstrBot 同机或挂载"
   }
 }
