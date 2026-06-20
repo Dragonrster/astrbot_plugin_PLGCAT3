@@ -122,14 +122,15 @@ async def mcsm_read_file(panel_url: str, api_key: str, instance_uuid: str, daemo
     import urllib.request
     url = (
         f"{panel_url}/api/files/"
-        f"?daemonId={daemon_uuid}"
+        f"?apikey={api_key}"
+        f"&daemonId={daemon_uuid}"
         f"&uuid={instance_uuid}"
     )
     body = json.dumps({"target": file_path}).encode("utf-8")
     try:
         req = urllib.request.Request(
             url, data=body, method="PUT",
-            headers={"Content-Type": "application/json", "Authorization": api_key},
+            headers={"Content-Type": "application/json"},
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode("utf-8"))
