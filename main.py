@@ -1516,7 +1516,7 @@ class MyPlugin(Star):
         async for msg in self.execute_and_reply(event, command, "广播消息"):
             yield msg
 
-    @filter.command("wantwl", desc="申请MC白名单")
+    @filter.command("wantwl", desc="申请MC白名单", alias={"绑定"})
     async def wantwl(self, event: AstrMessageEvent, mcname: str = ""):
         if not self.enable_apply_whitelist:
             yield event.plain_result("抱歉，白名单申请功能未开启。")
@@ -1600,7 +1600,7 @@ class MyPlugin(Star):
         lines.append("\n使用 /wantwlunbind <游戏ID> 解绑指定账号。")
         yield event.plain_result("\n".join(lines))
 
-    @filter.command("wantwlunbind", desc="解绑MC白名单账号", alias={"wantwlu"})
+    @filter.command("wantwlunbind", desc="解绑MC白名单账号", alias={"wantwlu", "解绑"})
     async def wantwlunbind(self, event: AstrMessageEvent, mcname: str = ""):
         if not self.enable_apply_whitelist:
             yield event.plain_result("抱歉，白名单申请功能未开启。")
@@ -1659,7 +1659,7 @@ class MyPlugin(Star):
         self._save_apply_data()
         yield event.plain_result(f"已切换主游戏账号为 {mcname}。\n当前绑定：{'、'.join(bound)}")
 
-    @filter.command("mcsign", desc="每日签到领铜钱", alias={"mcqd"})
+    @filter.command("mcsign", desc="每日签到领铜钱", alias={"mcqd", "签到", "jrrp"})
     async def mcsign(self, event: AstrMessageEvent):
         if not self.enable_sign:
             yield event.plain_result("抱歉，签到功能未开启。")
@@ -2430,7 +2430,7 @@ class MyPlugin(Star):
         async for msg in self.execute_and_reply(event, command, "Paper 实体列表"):
             yield msg
 
-    @filter.command("mcping", desc="MC ping", alias={"mcp"})
+    @filter.command("mcping", desc="MC ping", alias={"mcp", "ping"})
     async def mcping(self, event: AstrMessageEvent, target: str = "@a"):
         if not self.is_admin(str(event.get_sender_id())):
             yield event.plain_result("抱歉，你没有权限执行此操作。")
@@ -2460,7 +2460,7 @@ class MyPlugin(Star):
         async for msg in self.execute_and_reply(event, "tps", "TPS"):
             yield msg
 
-    @filter.command("mcauthunregister", desc="AuthMe 注销玩家", alias={"mcauthunreg"})
+    @filter.command("mcauthunregister", desc="AuthMe 注销玩家", alias={"mcauthunreg", "注销"})
     async def mcauthunregister(self, event: AstrMessageEvent, mcname: str = ""):
         if not self.is_admin(str(event.get_sender_id())):
             yield event.plain_result("抱歉，你没有权限执行此操作。")
