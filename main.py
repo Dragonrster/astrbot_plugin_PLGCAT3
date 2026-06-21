@@ -2349,7 +2349,8 @@ class MyPlugin(Star):
                 if stats is None:
                     yield event.plain_result(f"未找到玩家 {raw} 的统计数据。")
                     return
-                await self._send_stats_result(event, raw, stats)
+                async for msg in self._send_stats_result(event, raw, stats):
+                    yield msg
                 return
         bound = self.apply_data.get(target_qq, [])
         if not bound:
@@ -2366,7 +2367,7 @@ class MyPlugin(Star):
     async def _send_stats_result(self, event: AstrMessageEvent, mcname: str, stats: dict):
         """解析并发送玩家统计数据。"""
         custom = stats.get("stats", {})
-        # 游戏时长
+        # 修炼时长
         playtime_ticks = custom.get("minecraft:custom", {}).get("minecraft:total_world_time", 0)
         playtime = self._fmt_ticks(playtime_ticks)
         # 击杀/死亡
@@ -2384,8 +2385,8 @@ class MyPlugin(Star):
         fished = custom.get("minecraft:custom", {}).get("minecraft:fish_caught", 0)
         lines = [
             f"{mcname} 的统计",
-            f" 游戏时长：{playtime}",
-            f" 死亡次数：{deaths}",
+            f" 修炼时长：{playtime}",
+            f" 投胎数：{deaths}",
             f" 击杀数：{kills}",
             f" 移动距离：{walk_km:.1f} km",
             f" 捕鱼数：{fished}",
