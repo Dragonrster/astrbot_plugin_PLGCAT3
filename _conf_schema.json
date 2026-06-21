@@ -22,13 +22,13 @@
     "default": ""
   },
   "whitelist_command": {
-    "description": "whitelist命令名",
+    "description": "白名单命令名",
     "type": "string",
     "default": "whitelist",
-    "hint": "原版为whitelist, 可改成swl等白名单插件"
+    "hint": "原版为 whitelist，可改成 swl 等白名单插件命令"
   },
   "admin_qqs": {
-    "description": "允许使用敏感命令的 QQ 列表",
+    "description": "管理员 QQ 号列表（可使用敏感命令）",
     "type": "list",
     "items": {
       "type": "string"
@@ -36,7 +36,7 @@
     "default": []
   },
   "enable_apply_whitelist": {
-    "description": "是否开启玩家自主申请白名单",
+    "description": "是否允许玩家自助申请白名单",
     "type": "bool",
     "default": false
   },
@@ -44,117 +44,126 @@
     "description": "白名单绑定验证方式",
     "type": "string",
     "default": "code",
-    "hint": "none=无需验证直接绑定, online=要求玩家在线, code=游戏内验证码确认（最安全）"
+    "hint": "none=直接绑定, online=要求玩家在线, code=游戏内验证码（最安全）"
   },
   "mcrun_blocked_extra": {
-    "description": "在 /mcrun 默认拦截的首词之外追加禁止项（小写，与命令第一个词比较，不含命名空间前缀）",
+    "description": "/mcrun 追加拦截词（小写，与命令第一个词比较）",
     "type": "list",
     "items": {
       "type": "string"
     },
     "default": [],
-    "hint": "默认已拦截 stop、restart、op、deop、reload；例如追加 rl、bukkit:reload 的首词 rl"
+    "hint": "默认已拦截 stop、restart、op、deop、reload"
   },
   "mc_chat_log_to_qq_enabled": {
-    "description": "是否监听 MC 服务端聊天并转发到 QQ",
+    "description": "是否开启 MC→QQ 聊天转发",
     "type": "bool",
     "default": false
   },
   "mc_chat_source": {
-    "description": "聊天消息来源",
+    "description": "[聊天转发] 消息来源模式",
     "type": "string",
     "default": "file",
-    "hint": "file=读取本地日志文件, mcsm=通过 MCSM 面板 WebSocket 实时获取"
+    "hint": "file=读取本地日志文件, mcsm=通过 MCSM 面板 API 轮询"
   },
   "mc_chat_log_path": {
-    "description": "服务端 latest.log 的绝对路径，例如 Windows: D:/server/logs/latest.log；Linux: /home/mc/server/logs/latest.log",
+    "description": "[file 模式] 服务端 latest.log 绝对路径",
     "type": "string",
     "default": "",
-    "hint": "与开服端 logs/latest.log 一致；远程服需挂载或改用服内插件上报"
+    "hint": "mc_chat_source=file 时必填。Windows: D:/server/logs/latest.log, Linux: /home/mc/server/logs/latest.log"
+  },
+  "mcsm_panel_url": {
+    "description": "[mcsm 模式] MCSM 面板地址",
+    "type": "string",
+    "default": "http://localhost:23333",
+    "hint": "mc_chat_source=mcsm 时必填。例如 http://your-panel:23333"
+  },
+  "mcsm_api_key": {
+    "description": "[mcsm 模式] MCSM 面板 API Key",
+    "type": "string",
+    "default": "",
+    "hint": "mc_chat_source=mcsm 时必填。在面板设置 → API 接口中获取"
+  },
+  "mcsm_instance_uuid": {
+    "description": "[mcsm 模式] MCSM 实例 UUID",
+    "type": "string",
+    "default": "",
+    "hint": "mc_chat_source=mcsm 时必填。在实例设置页面 URL 中可见"
+  },
+  "mcsm_daemon_uuid": {
+    "description": "[mcsm 模式] MCSM 守护进程 UUID",
+    "type": "string",
+    "default": "",
+    "hint": "mc_chat_source=mcsm 时必填。在节点管理页面可见"
   },
   "mc_chat_trigger_prefix": {
-    "description": "游戏内聊天里、紧跟在 <玩家名> 后的触发前缀，匹配后才转发到 QQ（不含玩家名本身）",
+    "description": "[聊天转发] 游戏内触发前缀（紧跟在 <玩家名> 后）",
     "type": "string",
-    "default": ".mcsay "
+    "default": ".mcsay ",
+    "hint": "匹配后才转发到 QQ，不含玩家名本身"
   },
   "mc_chat_unified_msg_origin": {
-    "description": "转发目标会话 ID（与 event.unified_msg_origin 相同）。留空可在群内用管理员命令 /mcbindchat 写入数据文件",
+    "description": "[聊天转发] 转发目标会话 ID",
     "type": "string",
-    "default": ""
+    "default": "",
+    "hint": "留空可在群内用管理员命令 /mcbindchat 写入"
   },
   "mc_chat_qq_group_id": {
-    "description": "若未填 unified_msg_origin，可填 QQ 群号字符串，配合 mc_chat_qq_platform 用 StarTools.send_message_by_id 发群消息",
+    "description": "[聊天转发] QQ 群号（unified_msg_origin 为空时的备选）",
     "type": "string",
-    "default": ""
+    "default": "",
+    "hint": "配合 mc_chat_qq_platform 使用"
   },
   "mc_chat_qq_platform": {
-    "description": "send_message_by_id 使用的平台名，一般为 aiocqhttp",
+    "description": "[聊天转发] 平台名",
     "type": "string",
-    "default": "aiocqhttp"
+    "default": "aiocqhttp",
+    "hint": "一般为 aiocqhttp，无需修改"
   },
   "mc_chat_log_tail_from_end": {
-    "description": "启动时是否从日志文件末尾开始读，避免把历史聊天一次性转发到 QQ",
+    "description": "[file 模式] 启动时从日志末尾开始读",
     "type": "bool",
-    "default": true
+    "default": true,
+    "hint": "避免把历史聊天一次性转发到 QQ"
   },
   "enable_sign": {
-    "description": "是否开启每日签到功能（需先开启白名单申请并绑定账号）",
+    "description": "是否开启每日签到功能",
     "type": "bool",
-    "default": false
+    "default": false,
+    "hint": "需先开启白名单申请并绑定账号"
   },
   "sign_money_min": {
-    "description": "签到随机铜钱最低值",
+    "description": "[签到] 奖池随机最低值",
     "type": "int",
     "default": 10
   },
   "sign_money_max": {
-    "description": "签到随机铜钱最高值",
+    "description": "[签到] 奖池随机最高值",
     "type": "int",
     "default": 100
   },
   "sign_money_command": {
-    "description": "签到加钱的 RCON 命令模板，{name} 会被替换为玩家名，{amount} 会被替换为铜钱数",
+    "description": "[签到] 加钱 RCON 命令模板",
     "type": "string",
     "default": "d money add {name} {amount}",
-    "hint": "例如 EssentialsX 用: eco give {name} {amount}"
+    "hint": "{name}=玩家名, {amount}=铜钱数。EssentialsX 用: eco give {name} {amount}"
   },
   "money_command_prefix": {
-    "description": "铜钱系统命令前缀，用于查询/操作余额",
+    "description": "[签到] 铜钱系统命令前缀",
     "type": "string",
     "default": "d money",
-    "hint": "查询时拼接为: {prefix} get {name}"
+    "hint": "查询拼接为: {prefix} get {name}"
   },
   "sign_backfill_cost_per_day": {
-    "description": "补签每天基础费用（铜钱），越早的日期越贵：第N天前 = 基础费用 × 2^(N-1)",
+    "description": "[签到] 补签基础费用（铜钱/天）",
     "type": "int",
     "default": 50,
-    "hint": "例如 50：昨天补签 50，前天补签 100，大前天 200..."
-  },
-  "mcsm_panel_url": {
-    "description": "MCSM 面板地址",
-    "type": "string",
-    "default": "http://localhost:23333",
-    "hint": "例如 http://your-panel:23333"
-  },
-  "mcsm_api_key": {
-    "description": "MCSM 面板 API Key（面板设置 → API 接口）",
-    "type": "string",
-    "default": ""
-  },
-  "mcsm_instance_uuid": {
-    "description": "MCSM 实例 UUID（实例设置页面 URL 中可见）",
-    "type": "string",
-    "default": ""
-  },
-  "mcsm_daemon_uuid": {
-    "description": "MCSM 守护进程 UUID（节点管理页面可见）",
-    "type": "string",
-    "default": ""
+    "hint": "越早越贵：第N天前 = 基础 × 2^(N-1)"
   },
   "mc_stats_world_path": {
-    "description": "MC 服务器 world 目录绝对路径（用于读取玩家统计 stats/*.json），留空则通过 MCSM API 读取",
+    "description": "[统计] 服务器 world 目录绝对路径",
     "type": "string",
     "default": "",
-    "hint": "例如 /mc_server/world，需与 AstrBot 同机或挂载"
+    "hint": "留空则通过 MCSM API 读取。例如 /mc_server/world，需与 AstrBot 同机或挂载"
   }
 }
