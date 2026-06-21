@@ -1491,8 +1491,6 @@ class MyPlugin(Star):
             await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, command)
         except Exception as e:
             yield event.plain_result(f"发送失败：{e}")
-            return
-        yield event.plain_result(f"{named}：{text}")
 
     @filter.command("mcbroadcast", desc="MC 广播消息", alias={"mcb", "mcbc"})
     async def mcbroadcast(self, event: AstrMessageEvent):
