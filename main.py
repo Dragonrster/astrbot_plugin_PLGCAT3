@@ -1183,6 +1183,16 @@ class MyPlugin(Star):
             count = len(self.apply_data[qqid])
             body = f"玩家 {mcname} 绑定成功！（已绑定 {count} 个账号）"
             logger.info(f"[wantwl] {mcname} 绑定成功 (qq={qqid})")
+            # 游戏内通知
+            try:
+                notify_msg = json.dumps([
+                    {"text": "玩家 ", "color": "green"},
+                    {"text": mcname, "color": "gold"},
+                    {"text": f" 绑定成功！（已绑定 {count} 个账号）", "color": "green"},
+                ], ensure_ascii=False)
+                await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, f"tellraw @a {notify_msg}")
+            except Exception as e:
+                logger.warning(f"[wantwl] 游戏内通知失败: {e}")
         except Exception as e:
             body = f"玩家 {mcname} 绑定失败：{e}"
             logger.error(f"[wantwl] {mcname} 绑定失败: {e}")
