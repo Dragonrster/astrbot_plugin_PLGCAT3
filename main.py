@@ -2344,10 +2344,7 @@ class MyPlugin(Star):
             if at_qq:
                 target_qq = at_qq
             elif not raw.isdigit():
-                # 直接输入 MC 名（管理员）
-                if not self.is_admin(qqid):
-                    yield event.plain_result("只有管理员可以直接查询他人。")
-                    return
+                # 直接输入 MC 名
                 stats = await self._get_player_stats(raw)
                 if stats is None:
                     yield event.plain_result(f"未找到玩家 {raw} 的统计数据。")
