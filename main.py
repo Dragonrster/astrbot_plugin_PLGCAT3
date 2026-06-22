@@ -1377,8 +1377,8 @@ class MyPlugin(Star):
                 "  /mcsigncal  签到日历（mcsigncalendar）",
                 "  /mcsignback [日期]  补签（mcbq）",
                 "  [管] /mcsignadmin  签到数据管理（msa）",
-                "  /mcmoney  查询铜钱（mcqian）",
-                "  /mctransfer <游戏ID> <数量>  转账（mczz）",
+                "  /mcmoney  查询库存（mcqian）",
+                "  /mctransfer <游戏ID> <数量>  投喂（mczz）",
                 "",
                 "【其他】",
                 "  [管] /mckill <游戏ID>  击杀",
@@ -2021,14 +2021,14 @@ class MyPlugin(Star):
             resp_clean = strip_mc_color(resp).strip()
             nums = re.findall(r"[-+]?\d+(?:\.\d+)?", resp_clean)
             if not nums:
-                yield event.plain_result(f"无法解析铜钱余额：{resp_clean}")
+                yield event.plain_result(f"无法解析铜钱库存：{resp_clean}")
                 return
             balance = int(float(nums[-1]))
         except Exception as e:
-            yield event.plain_result(f"查询余额失败：{e}")
+            yield event.plain_result(f"查询库存失败：{e}")
             return
         if balance < cost:
-            yield event.plain_result(f"余额不足！补签 {ds} 需要 {cost} 铜钱，你当前有 {balance} 铜钱。")
+            yield event.plain_result(f"库存不足！补签 {ds} 需要 {cost} 铜钱，你当前有 {balance} 铜钱。")
             return
         # 扣款
         sub_cmd = f"{self.money_command_prefix} sub {mcname} {cost}"
@@ -2097,7 +2097,7 @@ class MyPlugin(Star):
             return raw_input
         return ""
 
-    @filter.command("mcmoney", desc="查询铜钱余额", alias={"mcqian", "mcq", "余额"})
+    @filter.command("mcmoney", desc="查询铜钱库存", alias={"mcqian", "mcq"})
     async def mcmoney(self, event: AstrMessageEvent):
         qqid = str(event.get_sender_id())
         raw = self._tail_after_command_names(event, "mcmoney", "mcqian", "mcq", "余额")
@@ -2117,7 +2117,7 @@ class MyPlugin(Star):
             else:
                 # 直接 MC 名（管理员查询）
                 if not self.is_admin(qqid):
-                    yield event.plain_result("只有管理员可以查询他人的铜钱余额。")
+                    yield event.plain_result("只有管理员可以查询他人的铜钱库存。")
                     return
                 targets = [raw]
         else:
@@ -2139,12 +2139,12 @@ class MyPlugin(Star):
                 lines.append(f"  {name}: {cresp if cresp else '(空响应)'}")
             except Exception as e:
                 lines.append(f"  {name}: 查询失败 - {e}")
-        yield event.plain_result("铜钱余额：\n" + "\n".join(lines))
+        yield event.plain_result("铜钱库存：\n" + "\n".join(lines))
 
-    @filter.command("mctransfer", desc="转账铜钱给其他玩家", alias={"mctrans", "mczz", "转账"})
+    @filter.command("mctransfer", desc="转账铜钱给其他玩家", alias={"mctrans", "mczz", "投喂"})
     async def mctransfer(self, event: AstrMessageEvent):
         qqid = str(event.get_sender_id())
-        raw = self._tail_after_command_names(event, "mctransfer", "mctrans", "mczz", "转账")
+        raw = self._tail_after_command_names(event, "mctransfer", "mctrans", "mczz", "投喂")
         m = re.match(r"^(\S+)\s+(\d+)\s*$", raw)
         if not m:
             yield event.plain_result("用法：/mctransfer <游戏ID> <数量>\n例如：/mctransfer Steve 100")
@@ -2225,14 +2225,14 @@ class MyPlugin(Star):
             resp_clean = strip_mc_color(resp).strip()
             nums = re.findall(r"[-+]?\d+(?:\.\d+)?", resp_clean)
             if not nums:
-                yield event.plain_result(f"无法解析你的铜钱余额：{resp_clean}")
+                yield event.plain_result(f"无法解析你的铜钱库存：{resp_clean}")
                 return
             balance = int(float(nums[-1]))
             if balance < amount:
-                yield event.plain_result(f"余额不足！你当前有 {balance} 铜钱，需要 {amount}。")
+                yield event.plain_result(f"库存不足！你当前有 {balance} 铜钱，需要 {amount}。")
                 return
         except Exception as e:
-            yield event.plain_result(f"查询余额失败：{e}")
+            yield event.plain_result(f"查询库存失败：{e}")
             return
         # 执行转账
         sub_cmd = f"{self.money_command_prefix} sub {sender_mc} {amount}"
@@ -2261,7 +2261,7 @@ class MyPlugin(Star):
             nums2 = re.findall(r"[-+]?\d+(?:\.\d+)?", resp2_clean)
             if nums2:
                 new_balance = int(float(nums2[-1]))
-                new_balance_str = f"\n当前余额：{new_balance} 铜钱"
+                new_balance_str = f"\n当前库存：{new_balance} 铜钱"
         except Exception:
             pass
         self._log_transfer(qqid, sender_mc, "", receiver_mc, amount, new_balance)
@@ -2270,7 +2270,7 @@ class MyPlugin(Star):
             notify_msg = json.dumps([
                 {"text": "你收到 ", "color": "green"},
                 {"text": sender_mc, "color": "gold"},
-                {"text": " 的转账：", "color": "green"},
+                {"text": " 的投喂：", "color": "green"},
                 {"text": f"{amount} 铜币", "color": "gold"},
             ], ensure_ascii=False)
             notify_cmd = f"tellraw {receiver_mc} {notify_msg}"
