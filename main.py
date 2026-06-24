@@ -1133,6 +1133,9 @@ class MyPlugin(Star):
                         wm = re.search(r"\.wantwl\s+(\S+)", line)
                         player = m.group(1) if m else None
                         input_code = wm.group(1).upper() if wm else None
+                        # 校验玩家名：防止聊天注入攻击
+                        if player and not re.match(r'^[A-Za-z0-9_]{1,16}$', player):
+                            player = None
                         pending_count = len(self._wl_pending)
                         logger.info(f"[MCSM] .wantwl行: player={player} code={input_code} pending={pending_count}")
                         if player and input_code:
@@ -1529,13 +1532,12 @@ class MyPlugin(Star):
         if not self.enable_apply_whitelist:
             yield event.plain_result("抱歉，白名单申请功能未开启。")
             return
-        # 只允许私聊绑定
-        umo = str(getattr(event, "unified_msg_origin", "") or "")
-        if "GroupMessage" in umo:
-            yield event.plain_result("白名单绑定请私聊发送，不要在群聊内操作。")
-            return
         if not mcname:
             yield event.plain_result("请输入要绑定的MC用户名，例如：/wantwl Steve")
+            return
+        # 校验 MC 用户名：只允许 A-Za-z0-9_，最多16字符，防止注入
+        if not re.match(r'^[A-Za-z0-9_]{1,16}$', mcname):
+            yield event.plain_result("无效的 MC 用户名，只允许字母、数字、下划线，最多16个字符。")
             return
 
         qqid = str(event.get_sender_id())
