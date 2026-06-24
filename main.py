@@ -2099,10 +2099,10 @@ class MyPlugin(Star):
             return raw_input
         return ""
 
-    @filter.command("mcmoney", desc="查询铜钱库存", alias={"mcqian", "mcq"})
+    @filter.command("mcmoney", desc="查询铜钱库存", alias={"mcqian", "mcq", "库存"})
     async def mcmoney(self, event: AstrMessageEvent):
         qqid = str(event.get_sender_id())
-        raw = self._tail_after_command_names(event, "mcmoney", "mcqian", "mcq", "余额")
+        raw = self._tail_after_command_names(event, "mcmoney", "mcqian", "mcq", "库存")
         raw = raw.strip().lstrip("@")
         if raw:
             # 尝试从 @ 解析 QQ 号
