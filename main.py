@@ -2588,33 +2588,47 @@ class MyPlugin(Star):
                     if time.time() >= end:
                         self._withdraw_until.pop(gid_str, None)
                         self._withdraw_group_ids.discard(gid_str)
+                        logger.info(f"[撤回] 群 {gid} 撤回时间已到，停止撤回")
                         continue
                     try:
                         result = await client.api.call_action("get_group_msg_history",
                             group_id=gid, message_seq=0, count=10, reverseOrder=True)
                         messages = list(reversed(result.get("messages", [])))
-                    except Exception:
+                    except Exception as e:
+                        logger.warning(f"[撤回] 获取消息失败: {e}")
                         await asyncio.sleep(2)
                         continue
 
+                    now = time.time()
                     sem = asyncio.Semaphore(5)
+                    deleted = 0
                     async def try_delete(msg: dict):
+                        nonlocal deleted
                         sender_id = str(msg.get("sender", {}).get("user_id", ""))
                         if sender_id in self.admin_qqs or sender_id == str(client.self_id):
+                            logger.info(f"[撤回] 跳过 msg={msg.get('message_id')} sender={sender_id}（管理员/机器人）")
+                            return
+                        # 只撤回最近出现的消息
+                        if msg.get("time", 0) < now - 30:
                             return
                         async with sem:
                             try:
                                 await client.delete_msg(message_id=msg["message_id"])
-                            except Exception:
-                                pass
+                                deleted += 1
+                                logger.info(f"[撤回] 已撤回 msg={msg['message_id']} sender={sender_id}")
+                            except Exception as e:
+                                logger.warning(f"[撤回] 撤回失败 msg={msg['message_id']}: {e}")
 
                     tasks = [try_delete(msg) for msg in messages]
                     await asyncio.gather(*tasks)
-                await asyncio.sleep(1.5)
+                    if deleted:
+                        logger.info(f"[撤回] 本轮撤回 {deleted} 条，剩余 {int(end - now)} 秒")
+                await asyncio.sleep(1.0)
         except asyncio.CancelledError:
             pass
         finally:
             self._withdraw_task = None
+            logger.info("[撤回] 后台任务已停止")
 
     async def terminate(self):
         logger.info("mcman plugin stopped")
