@@ -2562,72 +2562,57 @@ class MyPlugin(Star):
             yield event.plain_result("当前平台不支持撤回功能。")
             return
 
-        # 记录结束时间
         if not hasattr(self, "_withdraw_until"):
             self._withdraw_until = {}
         self._withdraw_until[str(group_id)] = time.time() + seconds
 
-        # 记录群号用于后台任务
-        if not hasattr(self, "_withdraw_group_ids"):
-            self._withdraw_group_ids = set()
-        self._withdraw_group_ids.add(str(group_id))
-
-        # 启动后台任务（仅第一次）
         if not hasattr(self, "_withdraw_task") or self._withdraw_task is None or self._withdraw_task.done():
-            self._withdraw_task = asyncio.create_task(self._withdraw_loop(client))
+            self._withdraw_task = asyncio.create_task(self._withdraw_loop(client, group_id))
 
-        yield event.plain_result(f"已开启消息撤回模式，接下来 {seconds} 秒内非管理员消息将被自动撤回。")
+        yield event.plain_result(f"已开启撤回模式，接下来 {seconds} 秒内非管理员消息将被自动撤回。")
 
-    async def _withdraw_loop(self, client):
-        """后台任务：定时检查并撤回需撤群组的消息。"""
+    async def _withdraw_loop(self, client, gid: int):
+        """高频轮询最新消息并立即撤回。"""
+        gid_str = str(gid)
+        seen = set()
         try:
-            while getattr(self, "_withdraw_until", {}) and getattr(self, "_withdraw_group_ids", set()):
-                for gid_str in list(self._withdraw_group_ids):
-                    gid = int(gid_str)
-                    end = self._withdraw_until.get(gid_str, 0)
-                    if time.time() >= end:
-                        self._withdraw_until.pop(gid_str, None)
-                        self._withdraw_group_ids.discard(gid_str)
-                        logger.info(f"[撤回] 群 {gid} 撤回时间已到，停止撤回")
+            while time.time() < self._withdraw_until.get(gid_str, 0):
+                try:
+                    result = await client.api.call_action("get_group_msg_history",
+                        group_id=gid, message_seq=0, count=3, reverseOrder=True)
+                    messages = list(reversed(result.get("messages", [])))
+                except Exception as e:
+                    logger.warning(f"[撤回] 获取消息失败: {e}")
+                    await asyncio.sleep(1)
+                    continue
+
+                for msg in messages:
+                    mid = msg["message_id"]
+                    if mid in seen:
+                        continue
+                    seen.add(mid)
+                    sender_id = str(msg.get("sender", {}).get("user_id", ""))
+                    if sender_id in self.admin_qqs or sender_id == str(client.self_id):
+                        continue
+                    # 只撤回新消息（5秒内的）
+                    if msg.get("time", 0) < time.time() - 5:
                         continue
                     try:
-                        result = await client.api.call_action("get_group_msg_history",
-                            group_id=gid, message_seq=0, count=5, reverseOrder=True)
-                        messages = list(reversed(result.get("messages", [])))
-                    except Exception as e:
-                        logger.warning(f"[撤回] 获取消息失败: {e}")
-                        await asyncio.sleep(2)
-                        continue
+                        await client.delete_msg(message_id=mid)
+                        logger.info(f"[撤回] 已撤回 msg={mid} sender={sender_id}")
+                    except Exception:
+                        pass
 
-                    now = time.time()
-                    sem = asyncio.Semaphore(2)
-                    deleted = 0
-                    async def try_delete(msg: dict):
-                        nonlocal deleted
-                        sender_id = str(msg.get("sender", {}).get("user_id", ""))
-                        if sender_id in self.admin_qqs or sender_id == str(client.self_id):
-                            return
-                        # QQ 只允许撤回 2 分钟内的消息，取 60 秒保险
-                        if msg.get("time", 0) < now - 60:
-                            return
-                        async with sem:
-                            try:
-                                await client.delete_msg(message_id=msg["message_id"])
-                                deleted += 1
-                                logger.info(f"[撤回] 已撤回 msg={msg['message_id']} sender={sender_id}")
-                            except Exception as e:
-                                logger.warning(f"[撤回] 撤回失败 msg={msg['message_id']}: {e}")
-
-                    tasks = [try_delete(msg) for msg in messages]
-                    await asyncio.gather(*tasks)
-                    if deleted:
-                        logger.info(f"[撤回] 本轮撤回 {deleted} 条，剩余 {int(end - now)} 秒")
-                await asyncio.sleep(1.0)
+                # 清理 seen 缓存
+                if len(seen) > 100:
+                    seen.clear()
+                await asyncio.sleep(0.8)
         except asyncio.CancelledError:
             pass
         finally:
+            self._withdraw_until.pop(gid_str, None)
             self._withdraw_task = None
-            logger.info("[撤回] 后台任务已停止")
+            logger.info(f"[撤回] 群 {gid} 撤回模式已停止")
 
     async def terminate(self):
         logger.info("mcman plugin stopped")
