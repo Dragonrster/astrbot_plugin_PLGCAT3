@@ -167,5 +167,11 @@
     "type": "string",
     "default": "",
     "hint": "留空自动检测系统字体"
+  },
+  "onebot_http_url": {
+    "description": "OneBot HTTP API 地址（用于撤回消息等功能）",
+    "type": "string",
+    "default": "http://127.0.0.1:5700",
+    "hint": "aiocqhttp 默认 http://127.0.0.1:5700"
   }
 }

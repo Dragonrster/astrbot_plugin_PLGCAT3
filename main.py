@@ -2531,6 +2531,95 @@ class MyPlugin(Star):
             "游戏内发：<触发前缀>内容>，默认触发前缀为 .mcsay （见 mc_chat_trigger_prefix）。"
         )
 
+    # ── 撤回消息 ───────────────────────────────────────────
+
+    async def _onebot_api(self, action: str, params: dict) -> dict | None:
+        """调用 OneBot HTTP API。"""
+        import urllib.request
+        onebot_url = str(self.config.get("onebot_http_url", "") or "").strip()
+        if not onebot_url:
+            return None
+        url = f"{onebot_url}/{action}"
+        body = json.dumps(params).encode("utf-8")
+        try:
+            req = urllib.request.Request(url, data=body, method="POST",
+                headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception as e:
+            logger.warning(f"[撤回] OneBot API 调用失败 ({action}): {e}")
+            return None
+
+    @filter.command("撤回", desc="撤回群内指定时间内非管理员的全部消息")
+    async def mcwithdraw(self, event: AstrMessageEvent):
+        if not self.is_admin(str(event.get_sender_id())):
+            yield event.plain_result("抱歉，你没有权限执行此操作。")
+            return
+        # 检查是否群聊
+        umo = str(getattr(event, "unified_msg_origin", "") or "")
+        if "GroupMessage" not in umo:
+            yield event.plain_result("此命令只能在群聊中使用。")
+            return
+        # 提取群号
+        group_id = None
+        try:
+            from urllib.parse import unquote
+            decoded = unquote(umo)
+            m = re.search(r"GroupMessage_(\d+)", decoded)
+            if m:
+                group_id = int(m.group(1))
+        except Exception:
+            pass
+        if not group_id:
+            yield event.plain_result("无法获取群号。")
+            return
+        # 解析秒数
+        raw = self._tail_after_command_names(event, "撤回")
+        try:
+            seconds = int(raw.strip()) if raw.strip() else 60
+        except ValueError:
+            yield event.plain_result("用法：.撤回 <秒数>  例如 .撤回 600（撤回10分钟内非管理员消息）")
+            return
+        if seconds <= 0 or seconds > 3600:
+            yield event.plain_result("秒数需在 1~3600（1小时）之间。")
+            return
+
+        cutoff = time.time() - seconds
+        # 获取群消息历史
+        resp = await self._onebot_api("get_group_msg_history", {
+            "group_id": group_id,
+            "count": 200,
+        })
+        if not resp or resp.get("status") != "ok":
+            yield event.plain_result("获取消息历史失败，请检查 OneBot HTTP API 是否已配置。")
+            return
+        messages = resp.get("data", {}).get("messages", [])
+        if not messages:
+            yield event.plain_result("未获取到消息。")
+            return
+
+        deleted = 0
+        skipped = 0
+        for msg in messages:
+            msg_time = msg.get("time", 0)
+            msg_id = msg.get("message_id", 0)
+            sender = msg.get("sender", {})
+            sender_id = str(sender.get("user_id", ""))
+            # 跳过管理员
+            if sender_id in self.admin_qqs:
+                skipped += 1
+                continue
+            # 跳过超时
+            if msg_time >= cutoff:
+                continue
+            # 撤回
+            result = await self._onebot_api("delete_msg", {"message_id": msg_id})
+            if result and result.get("status") == "ok":
+                deleted += 1
+            await asyncio.sleep(0.3)  # 避免频率限制
+
+        yield event.plain_result(f"撤回完成：删除 {deleted} 条，跳过管理员 {skipped} 条（{seconds}秒内）")
+
     async def terminate(self):
         logger.info("mcman plugin stopped")
         await self._stop_mc_chat_watcher_if_running()
