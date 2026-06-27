@@ -22,7 +22,7 @@ try:
 except ImportError:
     _HAS_JINJA2 = False
 
-from astrbot.api.event import filter, AstrMessageEvent, EventMessageType
+from astrbot.api.event import filter, AstrMessageEvent
 
 try:
     from astrbot.api.event import MessageChain
@@ -2558,9 +2558,11 @@ class MyPlugin(Star):
         yield event.plain_result(f"已开启撤回模式，接下来 {seconds} 秒内非管理员消息将被自动撤回。")
 
     @filter.regex(r".")
-    @filter.event_message_type(EventMessageType.GROUP_MESSAGE)
     async def _withdraw_interceptor(self, event: AstrMessageEvent):
         """拦截每条群消息，撤回期内非管理员消息立即撤回。"""
+        umo = str(getattr(event, "unified_msg_origin", "") or "")
+        if "GroupMessage" not in umo:
+            return
         if not hasattr(self, "_withdraw_until"):
             return
         gid = str(getattr(event, "group_id", None) or getattr(event, "get_group_id", lambda: None)() or "")
