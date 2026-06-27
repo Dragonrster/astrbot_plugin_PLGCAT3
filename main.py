@@ -2592,7 +2592,7 @@ class MyPlugin(Star):
                         continue
                     try:
                         result = await client.api.call_action("get_group_msg_history",
-                            group_id=gid, message_seq=0, count=10, reverseOrder=True)
+                            group_id=gid, message_seq=0, count=5, reverseOrder=True)
                         messages = list(reversed(result.get("messages", [])))
                     except Exception as e:
                         logger.warning(f"[撤回] 获取消息失败: {e}")
@@ -2600,16 +2600,15 @@ class MyPlugin(Star):
                         continue
 
                     now = time.time()
-                    sem = asyncio.Semaphore(5)
+                    sem = asyncio.Semaphore(2)
                     deleted = 0
                     async def try_delete(msg: dict):
                         nonlocal deleted
                         sender_id = str(msg.get("sender", {}).get("user_id", ""))
                         if sender_id in self.admin_qqs or sender_id == str(client.self_id):
-                            logger.info(f"[撤回] 跳过 msg={msg.get('message_id')} sender={sender_id}（管理员/机器人）")
                             return
-                        # 只撤回最近出现的消息
-                        if msg.get("time", 0) < now - 30:
+                        # QQ 只允许撤回 2 分钟内的消息，取 60 秒保险
+                        if msg.get("time", 0) < now - 60:
                             return
                         async with sem:
                             try:
