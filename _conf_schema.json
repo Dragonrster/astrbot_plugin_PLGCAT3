@@ -24,14 +24,18 @@
   "admin_qqs": {
     "description": "管理员 QQ 号列表",
     "type": "list",
-    "items": { "type": "string" },
+    "items": {
+      "type": "string"
+    },
     "default": [],
     "hint": "列表内的 QQ 可使用所有敏感命令"
   },
   "mcrun_blocked_extra": {
     "description": "/mcrun 追加拦截词",
     "type": "list",
-    "items": { "type": "string" },
+    "items": {
+      "type": "string"
+    },
     "default": [],
     "hint": "默认已拦截 stop、restart、op、deop、reload"
   },
@@ -167,5 +171,5 @@
     "type": "string",
     "default": "",
     "hint": "留空自动检测系统字体"
-  },
+  }
 }
