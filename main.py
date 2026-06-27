@@ -2533,77 +2533,88 @@ class MyPlugin(Star):
 
     # ── 撤回消息 ───────────────────────────────────────────
 
-    @filter.command("撤回", desc="撤回群内指定时间内非管理员的全部消息")
+    @filter.command("撤回", desc="撤回接下来指定时间内非管理员的全部消息")
     async def mcwithdraw(self, event: AstrMessageEvent):
         if not self.is_admin(str(event.get_sender_id())):
             yield event.plain_result("抱歉，你没有权限执行此操作。")
             return
-        # 检查是否群聊
         umo = str(getattr(event, "unified_msg_origin", "") or "")
         if "GroupMessage" not in umo:
             yield event.plain_result("此命令只能在群聊中使用。")
             return
-        # 获取群号
         group_id = getattr(event, "group_id", None) or getattr(event, "get_group_id", lambda: None)()
         if not group_id:
             yield event.plain_result("无法获取群号。")
             return
         group_id = int(group_id)
-        # 解析秒数
         raw = self._tail_after_command_names(event, "撤回")
         try:
             seconds = int(raw.strip()) if raw.strip() else 60
         except ValueError:
-            yield event.plain_result("用法：.撤回 <秒数>  例如 .撤回 600（撤回10分钟内非管理员消息）")
+            yield event.plain_result("用法：.撤回 <秒数>  例如 .撤回 600（撤回之后10分钟内的消息）")
             return
         if seconds <= 0 or seconds > 3600:
             yield event.plain_result("秒数需在 1~3600（1小时）之间。")
             return
 
-        cutoff = time.time() - seconds
-        # 通过 AstrBot 平台 API 获取消息历史
         client = getattr(event, "bot", None)
         if not client or not hasattr(client, "api"):
             yield event.plain_result("当前平台不支持撤回功能。")
             return
 
+        # 记录结束时间
+        if not hasattr(self, "_withdraw_until"):
+            self._withdraw_until = {}
+        self._withdraw_until[str(group_id)] = time.time() + seconds
+
+        # 记录群号用于后台任务
+        if not hasattr(self, "_withdraw_group_ids"):
+            self._withdraw_group_ids = set()
+        self._withdraw_group_ids.add(str(group_id))
+
+        # 启动后台任务（仅第一次）
+        if not hasattr(self, "_withdraw_task") or self._withdraw_task is None or self._withdraw_task.done():
+            self._withdraw_task = asyncio.create_task(self._withdraw_loop(client))
+
+        yield event.plain_result(f"已开启消息撤回模式，接下来 {seconds} 秒内非管理员消息将被自动撤回。")
+
+    async def _withdraw_loop(self, client):
+        """后台任务：定时检查并撤回需撤群组的消息。"""
         try:
-            result = await client.api.call_action("get_group_msg_history",
-                group_id=group_id, message_seq=0, count=200, reverseOrder=True)
-            messages = list(reversed(result.get("messages", [])))
-        except Exception as e:
-            logger.warning(f"[撤回] 获取消息历史失败: {e}")
-            yield event.plain_result(f"获取消息历史失败：{e}")
-            return
+            while getattr(self, "_withdraw_until", {}) and getattr(self, "_withdraw_group_ids", set()):
+                for gid_str in list(self._withdraw_group_ids):
+                    gid = int(gid_str)
+                    end = self._withdraw_until.get(gid_str, 0)
+                    if time.time() >= end:
+                        self._withdraw_until.pop(gid_str, None)
+                        self._withdraw_group_ids.discard(gid_str)
+                        continue
+                    try:
+                        result = await client.api.call_action("get_group_msg_history",
+                            group_id=gid, message_seq=0, count=10, reverseOrder=True)
+                        messages = list(reversed(result.get("messages", [])))
+                    except Exception:
+                        await asyncio.sleep(2)
+                        continue
 
-        if not messages:
-            yield event.plain_result("未获取到消息。")
-            return
+                    sem = asyncio.Semaphore(5)
+                    async def try_delete(msg: dict):
+                        sender_id = str(msg.get("sender", {}).get("user_id", ""))
+                        if sender_id in self.admin_qqs or sender_id == str(client.self_id):
+                            return
+                        async with sem:
+                            try:
+                                await client.delete_msg(message_id=msg["message_id"])
+                            except Exception:
+                                pass
 
-        sem = asyncio.Semaphore(10)
-        deleted = 0
-        skipped = 0
-
-        async def try_delete(msg: dict):
-            nonlocal deleted, skipped
-            msg_time = msg.get("time", 0)
-            sender_id = str(msg.get("sender", {}).get("user_id", ""))
-            if sender_id in self.admin_qqs:
-                skipped += 1
-                return
-            if msg_time < cutoff:
-                return
-            async with sem:
-                try:
-                    await client.delete_msg(message_id=msg["message_id"])
-                    deleted += 1
-                except Exception:
-                    pass
-
-        tasks = [try_delete(msg) for msg in messages]
-        await asyncio.gather(*tasks)
-
-        yield event.plain_result(f"撤回完成：删除 {deleted} 条，跳过管理员 {skipped} 条（{seconds}秒内）")
+                    tasks = [try_delete(msg) for msg in messages]
+                    await asyncio.gather(*tasks)
+                await asyncio.sleep(1.5)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self._withdraw_task = None
 
     async def terminate(self):
         logger.info("mcman plugin stopped")
