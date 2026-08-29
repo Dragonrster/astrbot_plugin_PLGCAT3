@@ -1154,7 +1154,7 @@ class MyPlugin(Star):
         if raw:
             m = re.match(r"^(\d+)$", raw)
             if not m:
-                yield event.plain_result("用法：.领 查看赏钱列表  |  .领 <编号> 领取指定赏钱")
+                yield event.plain_result("用法：.领 查看赏钱列表  |  .领 <號> 领取指定赏钱")
                 return
             target_short_id = int(m.group(1))
 
@@ -1189,7 +1189,7 @@ class MyPlugin(Star):
                 if not candidates:
                     yield event.plain_result("当前没有可领取的赏钱。")
                     return
-                lines = ["🧧 可领取的赏钱："]
+                lines = ["可领取的赏钱："]
                 for rp in candidates:
                     sid = rp.get("short_id", "?")
                     sname = rp.get("sender_name", rp.get("sender_qq", "?"))
@@ -1198,7 +1198,7 @@ class MyPlugin(Star):
                     rm = rp.get("remaining", 0)
                     lines.append(f"  [{sid}] {sname}：{bl}（剩 {rc} 个 / {rm} 铜钱）")
                 lines.append("")
-                lines.append("发送 .领 <编号> 领取指定赏钱")
+                lines.append("发送 .领 <號> 领取指定赏钱")
                 yield event.plain_result("\n".join(lines))
                 return
 
@@ -1209,7 +1209,7 @@ class MyPlugin(Star):
                     rp = cand
                     break
             if rp is None:
-                yield event.plain_result(f"编号 {target_short_id} 的赏钱不存在或已领完。发送 .领 查看列表")
+                yield event.plain_result(f"號 {target_short_id} 的赏钱不存在或已领完。发送 .领 查看列表")
                 return
 
             # 随机分配金额（微信式：随机上限为剩余均值的2倍，保证均匀且总额精确）
@@ -1259,6 +1259,64 @@ class MyPlugin(Star):
                 logger.info(f"[赏钱] 过期退回: {rp_id_exp} 退回 {refund} 给 {rp_exp['sender_qq']}")
             del self.red_packets[rp_id_exp]
         self._save_red_packets()
+
+    @filter.command("销", desc="管理员删除指定编号的赏钱", alias={"销"})
+    async def redpacket_delete(self, event: AstrMessageEvent):
+        if not self.is_admin(str(event.get_sender_id())):
+            yield event.plain_result("抱歉，你没有权限执行此操作。")
+            return
+        umo = str(getattr(event, "unified_msg_origin", "") or "")
+        if "GroupMessage" not in umo:
+            yield event.plain_result("请在群聊中使用。")
+            return
+        group_id = str(getattr(event, "group_id", None) or getattr(event, "get_group_id", lambda: None)() or "")
+        if not group_id:
+            yield event.plain_result("无法获取群号。")
+            return
+        raw = self._tail_after_command_names(event, "销").strip()
+        m = re.match(r"^(\d+)$", raw)
+        if not m:
+            yield event.plain_result("用法：.销 <编号>  删除指定赏钱并退回剩余铜钱")
+            return
+        target_short_id = int(m.group(1))
+
+        # 全局锁：防止删除与领取并发
+        if not hasattr(self, "_red_packet_lock"):
+            self._red_packet_lock = asyncio.Lock()
+        async with self._red_packet_lock:
+            # 找到目标赏钱
+            rp_id = None
+            rp = None
+            for rid, cand in self.red_packets.items():
+                if cand.get("group_id") != group_id:
+                    continue
+                if cand.get("short_id") == target_short_id:
+                    rp_id = rid
+                    rp = cand
+                    break
+            if rp is None:
+                yield event.plain_result(f"编号 {target_short_id} 的赏钱不存在。")
+                return
+            sname = rp.get("sender_name", rp.get("sender_qq", "?"))
+            remaining = rp.get("remaining", 0)
+            remaining_count = rp.get("remaining_count", 0)
+            claimed_count = rp.get("count", 0) - remaining_count
+            # 退回剩余铜钱
+            refund_ok = True
+            if remaining > 0:
+                refund_ok = await self._mc_add(rp.get("sender_mc", ""), remaining)
+            del self.red_packets[rp_id]
+            self._save_red_packets()
+            if refund_ok:
+                yield event.plain_result(
+                    f"已删除 [{target_short_id}] {sname} 的赏钱\n"
+                    f"已领 {claimed_count} 个，剩余 {remaining_count} 个 / {remaining} 铜钱已退回"
+                )
+            else:
+                yield event.plain_result(
+                    f"已删除 [{target_short_id}] {sname} 的赏钱\n"
+                    f"警告：退回 {remaining} 铜钱失败，请手动处理！"
+                )
 
     @filter.command("我的赏钱", desc="查看自己发送的赏钱", alias={"我的赏", "mypackets"})
     async def redpacket_mine(self, event: AstrMessageEvent):
@@ -1728,8 +1786,9 @@ class MyPlugin(Star):
                 "  /mcmoney  查询库存（mcqian）",
                 "  /mctransfer <游戏ID> <数量>  投喂（mczz）",
                 "  /赏 <金额> <数量>  发赏钱",
-                "  /领 [编号]  领取赏钱",
+                "  /领 [號]  领取赏钱",
                 "  /我的赏钱  查看我发的赏钱",
+                "  [管] /销 <编号>  删除指定赏钱并退回",
                 "",
                 "【其他】",
                 "  [管] /mckill <游戏ID>  击杀",
