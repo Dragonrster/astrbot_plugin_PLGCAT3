@@ -1073,14 +1073,17 @@ class MyPlugin(Star):
             return
         blessing = " ".join(parts[2:]) if len(parts) > 2 else "恭喜发财"
         # 校验
+        if count <= 0:
+            yield event.plain_result("赏钱数量必须大于 0。")
+            return
+        if total < 1000:
+            yield event.plain_result("最低总金额 1000 铜钱起发，防止刷屏。")
+            return
         if total < count:
             yield event.plain_result("总金额必须大于等于数量（每包至少1铜钱）。")
             return
-        if count <= 0 or count > 100:
-            yield event.plain_result("赏钱数量需在 1~100 之间。")
-            return
-        if total <= 0 or total > 100000000:
-            yield event.plain_result("金额需在 1~100000000 之间。")
+        if total > 100000000:
+            yield event.plain_result("金额超出上限（1亿铜钱）。")
             return
         # 检查绑定
         bound = self.apply_data.get(qqid, [])
