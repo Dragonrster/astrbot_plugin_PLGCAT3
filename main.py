@@ -1132,9 +1132,9 @@ class MyPlugin(Star):
             }
             self._save_red_packets()
         yield event.plain_result(
-            f" {blessing}\n"
+            f"寄语：{blessing}\n"
             f"赏钱已发出：{total} 铜钱 / {count} 个\n"
-            f"编号：{short_id}  |  发送 .领 {short_id} 或 .领 查看列表"
+            f"號：{short_id}  |  发送 .领 {short_id} 或 .领 查看列表"
         )
 
     @filter.command("领", desc="领取赏钱", alias={"领"})
@@ -1212,14 +1212,17 @@ class MyPlugin(Star):
                 yield event.plain_result(f"编号 {target_short_id} 的赏钱不存在或已领完。发送 .领 查看列表")
                 return
 
-            # 随机分配金额（整数，保证剩余金额精确）
+            # 随机分配金额（微信式：随机上限为剩余均值的2倍，保证均匀且总额精确）
             remaining_count = rp["remaining_count"]
             remaining_amount = rp["remaining"]
             if remaining_count == 1:
                 amount = remaining_amount
             else:
-                # 每个赏钱至少1，剩余部分随机
-                max_amt = remaining_amount - (remaining_count - 1)
+                avg = remaining_amount / remaining_count
+                # 上限取剩余均值2倍，且不超剩余-1（保证后面每包至少1）
+                max_amt = min(int(avg * 2), remaining_amount - (remaining_count - 1))
+                if max_amt < 1:
+                    max_amt = 1
                 amount = random.randint(1, max_amt)
             rp["claimed"][qqid] = amount
             rp["remaining_count"] -= 1
@@ -1238,11 +1241,11 @@ class MyPlugin(Star):
             # 检查是否领完
             if rp["remaining_count"] <= 0:
                 yield event.plain_result(
-                    f"🎉 你从 {sname} 的赏钱中领到了 {amount} 铜钱！赏钱已被领完！"
+                    f"你从 {sname} 的赏钱中领到了 {amount} 铜钱！赏钱已被领完！"
                 )
             else:
                 yield event.plain_result(
-                    f"🎉 你从 {sname} 的赏钱中领到了 {amount} 铜钱！剩余 {rp['remaining_count']} 个"
+                    f"你从 {sname} 的赏钱中领到了 {amount} 铜钱！剩余 {rp['remaining_count']} 个"
                 )
         # 检查过期赏钱，退回
         expired = self._expire_red_packets()
