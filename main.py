@@ -1239,14 +1239,15 @@ class MyPlugin(Star):
                 return
             sname = rp.get("sender_name", rp.get("sender_qq", "?"))
             total_amt = rp.get("total", 0)
+            blessing = rp.get("blessing", "")
             # 检查是否领完
             if rp["remaining_count"] <= 0:
                 yield event.plain_result(
-                    f"你从 {sname} 的赏钱中领到了 {amount} 铜钱！共 {total_amt} 铜钱，赏钱已被领完！"
+                    f"你从 {sname} 的赏钱中领到了 {amount} 铜钱！共 {total_amt} 铜钱，赏钱已被领完！寄语：{blessing}"
                 )
             else:
                 yield event.plain_result(
-                    f"你从 {sname} 的赏钱中领到了 {amount} 铜钱！共 {total_amt} 铜钱，剩余 {rp['remaining_count']} 个"
+                    f"你从 {sname} 的赏钱中领到了 {amount} 铜钱！共 {total_amt} 铜钱，剩余 {rp['remaining_count']} 个 寄语：{blessing}"
                 )
         # 检查过期赏钱，退回
         expired = self._expire_red_packets()
