@@ -953,13 +953,31 @@ class MyPlugin(Star):
         img.save(buf, format="PNG", optimize=True)
         return buf.getvalue()
 
-    # ── 红包 ───────────────────────────────────────────────
+    # ── 赏钱 ───────────────────────────────────────────────
 
     def _load_red_packets(self) -> dict:
         if os.path.isfile(self.red_packet_file):
             try:
                 with open(self.red_packet_file, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    data = json.load(f)
+                # 旧红包迁移：没有 short_id 的自动分配群内编号
+                changed = False
+                for gid in {rp.get("group_id", "") for rp in data.values() if rp.get("group_id")}:
+                    used = sorted(int(rp.get("short_id", 0)) for rp in data.values() if rp.get("group_id") == gid)
+                    nxt = 1
+                    for rp in data.values():
+                        if rp.get("group_id") != gid:
+                            continue
+                        if not rp.get("short_id"):
+                            while nxt in used:
+                                nxt += 1
+                            rp["short_id"] = nxt
+                            used.append(nxt)
+                            changed = True
+                if changed:
+                    with open(self.red_packet_file, "w", encoding="utf-8") as f:
+                        json.dump(data, f, ensure_ascii=False, indent=2)
+                return data
             except Exception:
                 pass
         return {}
@@ -969,7 +987,7 @@ class MyPlugin(Star):
             with open(self.red_packet_file, "w", encoding="utf-8") as f:
                 json.dump(self.red_packets, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            logger.warning(f"保存红包数据失败: {e}")
+            logger.warning(f"保存赏钱数据失败: {e}")
 
     async def _mc_balance(self, mcname: str) -> int | None:
         """查询 MC 账户余额，返回整数或 None。"""
@@ -993,7 +1011,7 @@ class MyPlugin(Star):
             low = strip_mc_color(resp).lower()
             err_kw = ["unknown player", "not found", "不存在", "没有找到", "error", "失败", "错误", "can't", "cannot", "invalid"]
             if low and any(k in low for k in err_kw) and "balance" not in low:
-                logger.warning(f"[红包] 加钱疑似失败: {mcname} +{amount} -> {resp}")
+                logger.warning(f"[赏钱] 加钱疑似失败: {mcname} +{amount} -> {resp}")
                 return False
             return True
         except Exception as e:
@@ -1010,7 +1028,7 @@ class MyPlugin(Star):
             err_kw = ["unknown player", "not found", "不存在", "没有找到", "error", "失败", "错误",
                       "can't", "cannot", "invalid", "not enough", "余额不足", "insufficient", "没有钱", "余额不够"]
             if low and any(k in low for k in err_kw):
-                logger.warning(f"[红包] 扣款疑似失败: {mcname} -{amount} -> {resp}")
+                logger.warning(f"[赏钱] 扣款疑似失败: {mcname} -{amount} -> {resp}")
                 return False
             return True
         except Exception as e:
@@ -1021,7 +1039,7 @@ class MyPlugin(Star):
         return time.time() > rp.get("expires_at", 0)
 
     def _expire_red_packets(self):
-        """处理过期红包：剩余金额退回发送者（懒处理，领取时触发）。"""
+        """处理过期赏钱：剩余金额退回发送者（懒处理，领取时触发）。"""
         now = time.time()
         expired_ids = []
         for rp_id, rp in self.red_packets.items():
@@ -1029,13 +1047,13 @@ class MyPlugin(Star):
                 expired_ids.append(rp_id)
         return expired_ids
 
-    @filter.command("赏", desc="发红包", alias={"赏"})
+    @filter.command("赏", desc="发赏钱", alias={"赏"})
     async def redpacket_send(self, event: AstrMessageEvent):
         qqid = str(event.get_sender_id())
         # 检查群聊
         umo = str(getattr(event, "unified_msg_origin", "") or "")
         if "GroupMessage" not in umo:
-            yield event.plain_result("发红包请在群聊中使用。")
+            yield event.plain_result("发赏钱请在群聊中使用。")
             return
         group_id = str(getattr(event, "group_id", None) or getattr(event, "get_group_id", lambda: None)() or "")
         if not group_id:
@@ -1059,7 +1077,7 @@ class MyPlugin(Star):
             yield event.plain_result("总金额必须大于等于数量（每包至少1铜钱）。")
             return
         if count <= 0 or count > 100:
-            yield event.plain_result("红包数量需在 1~100 之间。")
+            yield event.plain_result("赏钱数量需在 1~100 之间。")
             return
         if total <= 0 or total > 100000000:
             yield event.plain_result("金额需在 1~100000000 之间。")
@@ -1070,7 +1088,7 @@ class MyPlugin(Star):
             yield event.plain_result("你还没有绑定MC账号，请先使用 /wantwl 绑定。")
             return
         mcname = bound[0]
-        # 全局锁：串行化发红包，防止并发扣款竞态
+        # 全局锁：串行化发赏钱，防止并发扣款竞态
         if not hasattr(self, "_red_packet_lock"):
             self._red_packet_lock = asyncio.Lock()
         async with self._red_packet_lock:
@@ -1095,7 +1113,7 @@ class MyPlugin(Star):
             short_id = 1
             while short_id in group_seq:
                 short_id += 1
-            # 创建红包
+            # 创建赏钱
             rp_id = f"{int(time.time())}_{qqid}_{len(self.red_packets)}"
             self.red_packets[rp_id] = {
                 "short_id": short_id,
@@ -1114,17 +1132,17 @@ class MyPlugin(Star):
             }
             self._save_red_packets()
         yield event.plain_result(
-            f"🧧 {blessing}\n"
-            f"红包已发出：{total} 铜钱 / {count} 个\n"
+            f" {blessing}\n"
+            f"赏钱已发出：{total} 铜钱 / {count} 个\n"
             f"编号：{short_id}  |  发送 .领 {short_id} 或 .领 查看列表"
         )
 
-    @filter.command("领", desc="领取红包", alias={"领"})
+    @filter.command("领", desc="领取赏钱", alias={"领"})
     async def redpacket_claim(self, event: AstrMessageEvent):
         qqid = str(event.get_sender_id())
         umo = str(getattr(event, "unified_msg_origin", "") or "")
         if "GroupMessage" not in umo:
-            yield event.plain_result("领红包请在群聊中使用。")
+            yield event.plain_result("领赏钱请在群聊中使用。")
             return
         group_id = str(getattr(event, "group_id", None) or getattr(event, "get_group_id", lambda: None)() or "")
         if not group_id:
@@ -1136,7 +1154,7 @@ class MyPlugin(Star):
         if raw:
             m = re.match(r"^(\d+)$", raw)
             if not m:
-                yield event.plain_result("用法：.领 查看红包列表  |  .领 <编号> 领取指定红包")
+                yield event.plain_result("用法：.领 查看赏钱列表  |  .领 <编号> 领取指定赏钱")
                 return
             target_short_id = int(m.group(1))
 
@@ -1147,11 +1165,11 @@ class MyPlugin(Star):
             return
         mcname = bound[0]
 
-        # 全局锁：串行化领取，防止并发竞态（两人同时领最后一个红包）
+        # 全局锁：串行化领取，防止并发竞态（两人同时领最后一个赏钱）
         if not hasattr(self, "_red_packet_lock"):
             self._red_packet_lock = asyncio.Lock()
         async with self._red_packet_lock:
-            # 收集该群可领的红包（未领完、未过期、未领过、非自己的）
+            # 收集该群可领的赏钱（未领完、未过期、未领过、非自己的）
             candidates = []
             for rp_id, rp in self.red_packets.items():
                 if rp.get("group_id") != group_id:
@@ -1163,15 +1181,15 @@ class MyPlugin(Star):
                 if qqid in rp.get("claimed", {}):
                     continue
                 if rp.get("sender_qq") == qqid:
-                    continue  # 不能领自己的红包
+                    continue  # 不能领自己的赏钱
                 candidates.append(rp)
 
-            # 无参数：显示红包列表
+            # 无参数：显示赏钱列表
             if target_short_id is None:
                 if not candidates:
-                    yield event.plain_result("当前没有可领取的红包。")
+                    yield event.plain_result("当前没有可领取的赏钱。")
                     return
-                lines = ["🧧 可领取的红包："]
+                lines = ["🧧 可领取的赏钱："]
                 for rp in candidates:
                     sid = rp.get("short_id", "?")
                     sname = rp.get("sender_name", rp.get("sender_qq", "?"))
@@ -1180,7 +1198,7 @@ class MyPlugin(Star):
                     rm = rp.get("remaining", 0)
                     lines.append(f"  [{sid}] {sname}：{bl}（剩 {rc} 个 / {rm} 铜钱）")
                 lines.append("")
-                lines.append("发送 .领 <编号> 领取指定红包")
+                lines.append("发送 .领 <编号> 领取指定赏钱")
                 yield event.plain_result("\n".join(lines))
                 return
 
@@ -1191,7 +1209,7 @@ class MyPlugin(Star):
                     rp = cand
                     break
             if rp is None:
-                yield event.plain_result(f"编号 {target_short_id} 的红包不存在或已领完。发送 .领 查看列表")
+                yield event.plain_result(f"编号 {target_short_id} 的赏钱不存在或已领完。发送 .领 查看列表")
                 return
 
             # 随机分配金额（整数，保证剩余金额精确）
@@ -1200,7 +1218,7 @@ class MyPlugin(Star):
             if remaining_count == 1:
                 amount = remaining_amount
             else:
-                # 每个红包至少1，剩余部分随机
+                # 每个赏钱至少1，剩余部分随机
                 max_amt = remaining_amount - (remaining_count - 1)
                 amount = random.randint(1, max_amt)
             rp["claimed"][qqid] = amount
@@ -1220,13 +1238,13 @@ class MyPlugin(Star):
             # 检查是否领完
             if rp["remaining_count"] <= 0:
                 yield event.plain_result(
-                    f"🎉 你从 {sname} 的红包中领到了 {amount} 铜钱！红包已被领完！"
+                    f"🎉 你从 {sname} 的赏钱中领到了 {amount} 铜钱！赏钱已被领完！"
                 )
             else:
                 yield event.plain_result(
-                    f"🎉 你从 {sname} 的红包中领到了 {amount} 铜钱！剩余 {rp['remaining_count']} 个"
+                    f"🎉 你从 {sname} 的赏钱中领到了 {amount} 铜钱！剩余 {rp['remaining_count']} 个"
                 )
-        # 检查过期红包，退回
+        # 检查过期赏钱，退回
         expired = self._expire_red_packets()
         for rp_id_exp in expired:
             rp_exp = self.red_packets[rp_id_exp]
@@ -1235,11 +1253,11 @@ class MyPlugin(Star):
                 await self._mc_add(rp_exp.get("sender_mc", ""), refund)
                 rp_exp["remaining"] = 0
                 rp_exp["remaining_count"] = 0
-                logger.info(f"[红包] 过期退回: {rp_id_exp} 退回 {refund} 给 {rp_exp['sender_qq']}")
+                logger.info(f"[赏钱] 过期退回: {rp_id_exp} 退回 {refund} 给 {rp_exp['sender_qq']}")
             del self.red_packets[rp_id_exp]
         self._save_red_packets()
 
-    @filter.command("我的红包", desc="查看自己发送的红包", alias={"我的赏", "mypackets"})
+    @filter.command("我的赏钱", desc="查看自己发送的赏钱", alias={"我的赏", "mypackets"})
     async def redpacket_mine(self, event: AstrMessageEvent):
         qqid = str(event.get_sender_id())
         umo = str(getattr(event, "unified_msg_origin", "") or "")
@@ -1256,9 +1274,9 @@ class MyPlugin(Star):
                 continue
             mine.append(rp)
         if not mine:
-            yield event.plain_result("你还没有在本群发过红包。")
+            yield event.plain_result("你还没有在本群发过赏钱。")
             return
-        lines = ["🧧 我发送的红包："]
+        lines = [" 我发送的赏钱："]
         for rp in mine:
             sid = rp.get("short_id", "?")
             bl = rp.get("blessing", "")
@@ -1706,9 +1724,9 @@ class MyPlugin(Star):
                 "  [管] /mcsignadmin  签到数据管理（msa）",
                 "  /mcmoney  查询库存（mcqian）",
                 "  /mctransfer <游戏ID> <数量>  投喂（mczz）",
-                "  /赏 <金额> <数量>  发红包",
-                "  /领 [编号]  领取红包",
-                "  /我的红包  查看我发的红包",
+                "  /赏 <金额> <数量>  发赏钱",
+                "  /领 [编号]  领取赏钱",
+                "  /我的赏钱  查看我发的赏钱",
                 "",
                 "【其他】",
                 "  [管] /mckill <游戏ID>  击杀",
@@ -2894,3 +2912,4 @@ class MyPlugin(Star):
     async def terminate(self):
         logger.info("mcman plugin stopped")
         await self._stop_mc_chat_watcher_if_running()
+
