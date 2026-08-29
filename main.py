@@ -960,19 +960,18 @@ class MyPlugin(Star):
             try:
                 with open(self.red_packet_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                # 旧红包迁移：没有 short_id 的自动分配群内编号
+                # 旧红包迁移：没有 short_id 的按 最大编号+1 分配
                 changed = False
                 for gid in {rp.get("group_id", "") for rp in data.values() if rp.get("group_id")}:
                     used = sorted(int(rp.get("short_id", 0)) for rp in data.values() if rp.get("group_id") == gid)
-                    nxt = 1
+                    nxt = (used[-1] + 1) if used else 1
                     for rp in data.values():
                         if rp.get("group_id") != gid:
                             continue
                         if not rp.get("short_id"):
-                            while nxt in used:
-                                nxt += 1
                             rp["short_id"] = nxt
                             used.append(nxt)
+                            nxt += 1
                             changed = True
                 if changed:
                     with open(self.red_packet_file, "w", encoding="utf-8") as f:
@@ -1107,15 +1106,13 @@ class MyPlugin(Star):
             if not await self._mc_sub(mcname, total):
                 yield event.plain_result("扣款失败，请稍后再试。")
                 return
-            # 生成群内短编号（1 开始递增，跳过已存在的）
-            group_seq = sorted(
+            # 生成群内短编号（最大编号+1，永久递增不重用，删除也不回退）
+            existing_ids = [
                 int(rp.get("short_id", 0))
                 for rp in self.red_packets.values()
                 if rp.get("group_id") == group_id
-            )
-            short_id = 1
-            while short_id in group_seq:
-                short_id += 1
+            ]
+            short_id = max(existing_ids) + 1 if existing_ids else 1
             # 创建赏钱
             rp_id = f"{int(time.time())}_{qqid}_{len(self.red_packets)}"
             self.red_packets[rp_id] = {
@@ -1250,7 +1247,7 @@ class MyPlugin(Star):
                 )
             else:
                 yield event.plain_result(
-                    f"你从 {sname} 的赏钱中领到了 {amount} 铜！余 {rem_amt} 铜，剩余 {rp['remaining_count']} 个 寄语：{blessing}"
+                    f"你从 {sname} 的赏钱中领到了 {amount} 铜！余 {rem_amt} 铜/ {rp['remaining_count']} 个 寄语：{blessing}"
                 )
         # 检查过期赏钱，退回
         expired = self._expire_red_packets()
@@ -1315,7 +1312,7 @@ class MyPlugin(Star):
             if refund_ok:
                 yield event.plain_result(
                     f"已删除 [{target_short_id}] {sname} 的赏钱\n"
-                    f"已领 {claimed_count} 个，剩余 {remaining_count} 个 / {remaining} 铜已退回"
+                    f"已领 {claimed_count} 个，余 {remaining_count} 个 / {remaining} 铜已退回"
                 )
             else:
                 yield event.plain_result(
