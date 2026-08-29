@@ -985,10 +985,16 @@ class MyPlugin(Star):
             return None
 
     async def _mc_add(self, mcname: str, amount: int) -> bool:
-        """给 MC 账户加钱。"""
+        """给 MC 账户加钱，校验 RCON 返回是否报错。"""
         try:
             cmd = self.sign_money_command.replace("{name}", mcname).replace("{amount}", str(amount))
-            await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, cmd)
+            resp = await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, cmd)
+            # 校验返回是否包含错误关键词
+            low = strip_mc_color(resp).lower()
+            err_kw = ["unknown player", "not found", "不存在", "没有找到", "error", "失败", "错误", "can't", "cannot", "invalid"]
+            if low and any(k in low for k in err_kw) and "balance" not in low:
+                logger.warning(f"[红包] 加钱疑似失败: {mcname} +{amount} -> {resp}")
+                return False
             return True
         except Exception as e:
             logger.warning(f"加钱失败: {e}")
@@ -998,7 +1004,14 @@ class MyPlugin(Star):
         """从 MC 账户扣钱。"""
         try:
             cmd = f"{self.money_command_prefix} sub {mcname} {amount}"
-            await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, cmd)
+            resp = await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, cmd)
+            # 校验返回是否包含错误关键词（余额不足等）
+            low = strip_mc_color(resp).lower()
+            err_kw = ["unknown player", "not found", "不存在", "没有找到", "error", "失败", "错误",
+                      "can't", "cannot", "invalid", "not enough", "余额不足", "insufficient", "没有钱", "余额不够"]
+            if low and any(k in low for k in err_kw):
+                logger.warning(f"[红包] 扣款疑似失败: {mcname} -{amount} -> {resp}")
+                return False
             return True
         except Exception as e:
             logger.warning(f"扣款失败: {e}")
@@ -1057,34 +1070,38 @@ class MyPlugin(Star):
             yield event.plain_result("你还没有绑定MC账号，请先使用 /wantwl 绑定。")
             return
         mcname = bound[0]
-        # 查余额
-        balance = await self._mc_balance(mcname)
-        if balance is None:
-            yield event.plain_result("无法查询余额，请稍后再试。")
-            return
-        if balance < total:
-            yield event.plain_result(f"余额不足！你当前有 {balance} 铜钱，需要 {total}。")
-            return
-        # 扣款
-        if not await self._mc_sub(mcname, total):
-            yield event.plain_result("扣款失败，请稍后再试。")
-            return
-        # 创建红包
-        rp_id = f"{int(time.time())}_{qqid}_{len(self.red_packets)}"
-        self.red_packets[rp_id] = {
-            "sender_qq": qqid,
-            "sender_mc": mcname,
-            "group_id": group_id,
-            "total": total,
-            "remaining": total,
-            "count": count,
-            "remaining_count": count,
-            "claimed": {},  # {qqid: amount}
-            "blessing": blessing,
-            "created_at": time.time(),
-            "expires_at": time.time() + 3600,  # 1小时有效
-        }
-        self._save_red_packets()
+        # 全局锁：串行化发红包，防止并发扣款竞态
+        if not hasattr(self, "_red_packet_lock"):
+            self._red_packet_lock = asyncio.Lock()
+        async with self._red_packet_lock:
+            # 查余额
+            balance = await self._mc_balance(mcname)
+            if balance is None:
+                yield event.plain_result("无法查询余额，请稍后再试。")
+                return
+            if balance < total:
+                yield event.plain_result(f"余额不足！你当前有 {balance} 铜钱，需要 {total}。")
+                return
+            # 扣款
+            if not await self._mc_sub(mcname, total):
+                yield event.plain_result("扣款失败，请稍后再试。")
+                return
+            # 创建红包
+            rp_id = f"{int(time.time())}_{qqid}_{len(self.red_packets)}"
+            self.red_packets[rp_id] = {
+                "sender_qq": qqid,
+                "sender_mc": mcname,
+                "group_id": group_id,
+                "total": total,
+                "remaining": total,
+                "count": count,
+                "remaining_count": count,
+                "claimed": {},  # {qqid: amount}
+                "blessing": blessing,
+                "created_at": time.time(),
+                "expires_at": time.time() + 3600,  # 1小时有效
+            }
+            self._save_red_packets()
         yield event.plain_result(
             f"🧧 {blessing}\n"
             f"红包已发出：{total} 铜钱 / {count} 个\n"
@@ -1109,57 +1126,61 @@ class MyPlugin(Star):
             return
         mcname = bound[0]
 
-        # 找到该群未领完且未过期的红包
-        candidates = []
-        for rp_id, rp in self.red_packets.items():
-            if rp.get("group_id") != group_id:
-                continue
-            if rp.get("remaining_count", 0) <= 0:
-                continue
-            if self._red_packet_expired(rp):
-                continue
-            if qqid in rp.get("claimed", {}):
-                continue
-            if rp.get("sender_qq") == qqid:
-                continue  # 不能领自己的红包
-            candidates.append(rp)
-        if not candidates:
-            yield event.plain_result("当前没有可领取的红包。")
-            return
-        # 取最早的红包
-        rp = min(candidates, key=lambda x: x.get("created_at", 0))
+        # 全局锁：串行化领取，防止并发竞态（两人同时领最后一个红包）
+        if not hasattr(self, "_red_packet_lock"):
+            self._red_packet_lock = asyncio.Lock()
+        async with self._red_packet_lock:
+            # 找到该群未领完且未过期的红包
+            candidates = []
+            for rp_id, rp in self.red_packets.items():
+                if rp.get("group_id") != group_id:
+                    continue
+                if rp.get("remaining_count", 0) <= 0:
+                    continue
+                if self._red_packet_expired(rp):
+                    continue
+                if qqid in rp.get("claimed", {}):
+                    continue
+                if rp.get("sender_qq") == qqid:
+                    continue  # 不能领自己的红包
+                candidates.append(rp)
+            if not candidates:
+                yield event.plain_result("当前没有可领取的红包。")
+                return
+            # 取最早的红包
+            rp = min(candidates, key=lambda x: x.get("created_at", 0))
 
-        # 随机分配金额（整数，保证剩余金额精确）
-        remaining_count = rp["remaining_count"]
-        remaining_amount = rp["remaining"]
-        if remaining_count == 1:
-            amount = remaining_amount
-        else:
-            # 每个红包至少1，剩余部分随机
-            max_amt = remaining_amount - (remaining_count - 1)
-            amount = random.randint(1, max_amt)
-        rp["claimed"][qqid] = amount
-        rp["remaining_count"] -= 1
-        rp["remaining"] -= amount
-        self._save_red_packets()
-        # 加钱
-        if not await self._mc_add(mcname, amount):
-            # 加钱失败，回滚领取
-            del rp["claimed"][qqid]
-            rp["remaining_count"] += 1
-            rp["remaining"] += amount
+            # 随机分配金额（整数，保证剩余金额精确）
+            remaining_count = rp["remaining_count"]
+            remaining_amount = rp["remaining"]
+            if remaining_count == 1:
+                amount = remaining_amount
+            else:
+                # 每个红包至少1，剩余部分随机
+                max_amt = remaining_amount - (remaining_count - 1)
+                amount = random.randint(1, max_amt)
+            rp["claimed"][qqid] = amount
+            rp["remaining_count"] -= 1
+            rp["remaining"] -= amount
             self._save_red_packets()
-            yield event.plain_result("发放失败，请稍后再试。")
-            return
-        # 检查是否领完
-        if rp["remaining_count"] <= 0:
-            yield event.plain_result(
-                f"🎉 你领到了 {amount} 铜钱！红包已被领完！"
-            )
-        else:
-            yield event.plain_result(
-                f"🎉 你领到了 {amount} 铜钱！剩余 {rp['remaining_count']} 个"
-            )
+            # 加钱（锁内执行 RCON，确保失败回滚时状态一致）
+            if not await self._mc_add(mcname, amount):
+                # 加钱失败，回滚领取
+                del rp["claimed"][qqid]
+                rp["remaining_count"] += 1
+                rp["remaining"] += amount
+                self._save_red_packets()
+                yield event.plain_result("发放失败，请稍后再试。")
+                return
+            # 检查是否领完
+            if rp["remaining_count"] <= 0:
+                yield event.plain_result(
+                    f" 你领到了 {amount} 铜钱！红包已被领完！"
+                )
+            else:
+                yield event.plain_result(
+                    f" 你领到了 {amount} 铜钱！剩余 {rp['remaining_count']} 个"
+                )
         # 检查过期红包，退回
         expired = self._expire_red_packets()
         for rp_id_exp in expired:
