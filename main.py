@@ -1086,10 +1086,21 @@ class MyPlugin(Star):
             if not await self._mc_sub(mcname, total):
                 yield event.plain_result("扣款失败，请稍后再试。")
                 return
+            # 生成群内短编号（1 开始递增，跳过已存在的）
+            group_seq = sorted(
+                int(rp.get("short_id", 0))
+                for rp in self.red_packets.values()
+                if rp.get("group_id") == group_id
+            )
+            short_id = 1
+            while short_id in group_seq:
+                short_id += 1
             # 创建红包
             rp_id = f"{int(time.time())}_{qqid}_{len(self.red_packets)}"
             self.red_packets[rp_id] = {
+                "short_id": short_id,
                 "sender_qq": qqid,
+                "sender_name": event.get_sender_name(),
                 "sender_mc": mcname,
                 "group_id": group_id,
                 "total": total,
@@ -1105,7 +1116,7 @@ class MyPlugin(Star):
         yield event.plain_result(
             f"🧧 {blessing}\n"
             f"红包已发出：{total} 铜钱 / {count} 个\n"
-            f"发送 .领 即可领取（1小时内有效，每人限领1次）"
+            f"编号：{short_id}  |  发送 .领 {short_id} 或 .领 查看列表"
         )
 
     @filter.command("领", desc="领取红包", alias={"领"})
@@ -1119,6 +1130,16 @@ class MyPlugin(Star):
         if not group_id:
             yield event.plain_result("无法获取群号。")
             return
+        raw = self._tail_after_command_names(event, "领").strip()
+        # 解析目标编号
+        target_short_id = None
+        if raw:
+            m = re.match(r"^(\d+)$", raw)
+            if not m:
+                yield event.plain_result("用法：.领 查看红包列表  |  .领 <编号> 领取指定红包")
+                return
+            target_short_id = int(m.group(1))
+
         # 检查绑定
         bound = self.apply_data.get(qqid, [])
         if not bound:
@@ -1130,7 +1151,7 @@ class MyPlugin(Star):
         if not hasattr(self, "_red_packet_lock"):
             self._red_packet_lock = asyncio.Lock()
         async with self._red_packet_lock:
-            # 找到该群未领完且未过期的红包
+            # 收集该群可领的红包（未领完、未过期、未领过、非自己的）
             candidates = []
             for rp_id, rp in self.red_packets.items():
                 if rp.get("group_id") != group_id:
@@ -1144,11 +1165,34 @@ class MyPlugin(Star):
                 if rp.get("sender_qq") == qqid:
                     continue  # 不能领自己的红包
                 candidates.append(rp)
-            if not candidates:
-                yield event.plain_result("当前没有可领取的红包。")
+
+            # 无参数：显示红包列表
+            if target_short_id is None:
+                if not candidates:
+                    yield event.plain_result("当前没有可领取的红包。")
+                    return
+                lines = ["🧧 可领取的红包："]
+                for rp in candidates:
+                    sid = rp.get("short_id", "?")
+                    sname = rp.get("sender_name", rp.get("sender_qq", "?"))
+                    bl = rp.get("blessing", "")
+                    rc = rp.get("remaining_count", 0)
+                    rm = rp.get("remaining", 0)
+                    lines.append(f"  [{sid}] {sname}：{bl}（剩 {rc} 个 / {rm} 铜钱）")
+                lines.append("")
+                lines.append("发送 .领 <编号> 领取指定红包")
+                yield event.plain_result("\n".join(lines))
                 return
-            # 取最早的红包
-            rp = min(candidates, key=lambda x: x.get("created_at", 0))
+
+            # 按编号领取
+            rp = None
+            for cand in candidates:
+                if cand.get("short_id") == target_short_id:
+                    rp = cand
+                    break
+            if rp is None:
+                yield event.plain_result(f"编号 {target_short_id} 的红包不存在或已领完。发送 .领 查看列表")
+                return
 
             # 随机分配金额（整数，保证剩余金额精确）
             remaining_count = rp["remaining_count"]
@@ -1172,14 +1216,15 @@ class MyPlugin(Star):
                 self._save_red_packets()
                 yield event.plain_result("发放失败，请稍后再试。")
                 return
+            sname = rp.get("sender_name", rp.get("sender_qq", "?"))
             # 检查是否领完
             if rp["remaining_count"] <= 0:
                 yield event.plain_result(
-                    f" 你领到了 {amount} 铜钱！红包已被领完！"
+                    f"🎉 你从 {sname} 的红包中领到了 {amount} 铜钱！红包已被领完！"
                 )
             else:
                 yield event.plain_result(
-                    f" 你领到了 {amount} 铜钱！剩余 {rp['remaining_count']} 个"
+                    f"🎉 你从 {sname} 的红包中领到了 {amount} 铜钱！剩余 {rp['remaining_count']} 个"
                 )
         # 检查过期红包，退回
         expired = self._expire_red_packets()
