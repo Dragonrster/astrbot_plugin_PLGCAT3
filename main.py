@@ -1239,6 +1239,37 @@ class MyPlugin(Star):
             del self.red_packets[rp_id_exp]
         self._save_red_packets()
 
+    @filter.command("我的红包", desc="查看自己发送的红包", alias={"我的赏", "mypackets"})
+    async def redpacket_mine(self, event: AstrMessageEvent):
+        qqid = str(event.get_sender_id())
+        umo = str(getattr(event, "unified_msg_origin", "") or "")
+        if "GroupMessage" not in umo:
+            yield event.plain_result("请在群聊中使用。")
+            return
+        group_id = str(getattr(event, "group_id", None) or getattr(event, "get_group_id", lambda: None)() or "")
+        if not group_id:
+            yield event.plain_result("无法获取群号。")
+            return
+        mine = []
+        for rp_id, rp in self.red_packets.items():
+            if rp.get("sender_qq") != qqid or rp.get("group_id") != group_id:
+                continue
+            mine.append(rp)
+        if not mine:
+            yield event.plain_result("你还没有在本群发过红包。")
+            return
+        lines = ["🧧 我发送的红包："]
+        for rp in mine:
+            sid = rp.get("short_id", "?")
+            bl = rp.get("blessing", "")
+            rc = rp.get("remaining_count", 0)
+            rm = rp.get("remaining", 0)
+            total = rp.get("total", 0)
+            claimed_count = rp.get("count", 0) - rc
+            status = "已领完" if rc <= 0 else f"剩余 {rc} 个 / {rm} 铜钱"
+            lines.append(f"  [{sid}] {bl}（{total} 铜钱 / {claimed_count} 人已领）{status}")
+        yield event.plain_result("\n".join(lines))
+
     def _log_transfer(self, sender_qq: str, sender_mc: str, receiver_qq: str, receiver_mc: str, amount: int, balance_after: int | None):
         record = {
             "time": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -1676,7 +1707,8 @@ class MyPlugin(Star):
                 "  /mcmoney  查询库存（mcqian）",
                 "  /mctransfer <游戏ID> <数量>  投喂（mczz）",
                 "  /赏 <金额> <数量>  发红包",
-                "  /领  领取红包",
+                "  /领 [编号]  领取红包",
+                "  /我的红包  查看我发的红包",
                 "",
                 "【其他】",
                 "  [管] /mckill <游戏ID>  击杀",
