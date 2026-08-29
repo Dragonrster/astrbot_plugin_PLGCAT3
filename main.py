@@ -1029,7 +1029,7 @@ class MyPlugin(Star):
                 expired_ids.append(rp_id)
         return expired_ids
 
-    @filter.command("发红包", desc="发红包", alias={"红", "hb"})
+    @filter.command("赏", desc="发红包", alias={"赏"})
     async def redpacket_send(self, event: AstrMessageEvent):
         qqid = str(event.get_sender_id())
         # 检查群聊
@@ -1042,10 +1042,10 @@ class MyPlugin(Star):
             yield event.plain_result("无法获取群号。")
             return
         # 解析参数: 金额 数量 [祝福语]
-        raw = self._tail_after_command_names(event, "发红包", "红", "hb")
+        raw = self._tail_after_command_names(event, "赏")
         parts = raw.strip().split()
         if len(parts) < 2:
-            yield event.plain_result("用法：.发红包 <总金额> <数量> [祝福语]  例如 .发红包 1000 5")
+            yield event.plain_result("用法：.赏 <总金额> <数量> [祝福语]  例如 .赏 1000 5")
             return
         try:
             total = int(parts[0])
@@ -1105,10 +1105,10 @@ class MyPlugin(Star):
         yield event.plain_result(
             f"🧧 {blessing}\n"
             f"红包已发出：{total} 铜钱 / {count} 个\n"
-            f"发送 .领红包 即可领取（1小时内有效，每人限领1次）"
+            f"发送 .领 即可领取（1小时内有效，每人限领1次）"
         )
 
-    @filter.command("领红包", desc="领取红包", alias={"领", "hbget"})
+    @filter.command("领", desc="领取红包", alias={"领"})
     async def redpacket_claim(self, event: AstrMessageEvent):
         qqid = str(event.get_sender_id())
         umo = str(getattr(event, "unified_msg_origin", "") or "")
@@ -1630,8 +1630,8 @@ class MyPlugin(Star):
                 "  [管] /mcsignadmin  签到数据管理（msa）",
                 "  /mcmoney  查询库存（mcqian）",
                 "  /mctransfer <游戏ID> <数量>  投喂（mczz）",
-                "  /发红包 <金额> <数量>  发红包（红）",
-                "  /领红包  领取红包（领）",
+                "  /赏 <金额> <数量>  发红包",
+                "  /领  领取红包",
                 "",
                 "【其他】",
                 "  [管] /mckill <游戏ID>  击杀",
