@@ -831,7 +831,7 @@ class MyPlugin(Star):
         if no_reward_reason:
             draw.text((30, y + 10), no_reward_reason, fill="#999999", font=font)
         elif reward > 0:
-            draw.text((30, y + 8), "获得铜钱", fill="#666666", font=font)
+            draw.text((30, y + 8), "获得铜", fill="#666666", font=font)
             draw.text((30, y + 30), f"+{reward}", fill="#E65100", font=font_big)
             bw = draw.textbbox((0, 0), f"+{reward}", font=font_big)
             info_parts = [f"奖池 {pool} / {yesterday_count} 人"]
@@ -1077,13 +1077,13 @@ class MyPlugin(Star):
             yield event.plain_result("赏钱数量必须大于 0。")
             return
         if total < 1000:
-            yield event.plain_result("最低总金额 1000 铜钱起发，防止刷屏。")
+            yield event.plain_result("最低 1000 铜起发。")
             return
-        if total < count:
-            yield event.plain_result("总金额必须大于等于数量（每包至少1铜钱）。")
+        if total // count < 100:
+            yield event.plain_result(f"每包平均值不能低于 100 铜钱（当前均值 {total // count}）。最多可发 {total // 100} 个。")
             return
         if total > 100000000:
-            yield event.plain_result("金额超出上限（1亿铜钱）。")
+            yield event.plain_result("超出上限（1亿铜）。")
             return
         # 检查绑定
         bound = self.apply_data.get(qqid, [])
@@ -1101,7 +1101,7 @@ class MyPlugin(Star):
                 yield event.plain_result("无法查询余额，请稍后再试。")
                 return
             if balance < total:
-                yield event.plain_result(f"余额不足！你当前有 {balance} 铜钱，需要 {total}。")
+                yield event.plain_result(f"余额不足！你当前有 {balance} 铜，需要 {total}。")
                 return
             # 扣款
             if not await self._mc_sub(mcname, total):
@@ -1136,7 +1136,7 @@ class MyPlugin(Star):
             self._save_red_packets()
         yield event.plain_result(
             f"寄语：{blessing}\n"
-            f"赏钱已发出：{total} 铜钱 / {count} 个\n"
+            f"赏钱已发出：{total} 铜 / {count} 个\n"
             f"號：{short_id}  |  发送 .领 {short_id} 或 .领 查看列表"
         )
 
@@ -1199,7 +1199,7 @@ class MyPlugin(Star):
                     bl = rp.get("blessing", "")
                     rc = rp.get("remaining_count", 0)
                     rm = rp.get("remaining", 0)
-                    lines.append(f"  [{sid}] {sname}：{bl}（剩 {rc} 个 / {rm} 铜钱）")
+                    lines.append(f"  [{sid}] {sname}：{bl}（剩 {rc} 个 / {rm} 铜）")
                 lines.append("")
                 lines.append("发送 .领 <號> 领取指定赏钱")
                 yield event.plain_result("\n".join(lines))
@@ -1246,11 +1246,11 @@ class MyPlugin(Star):
             # 检查是否领完
             if rp["remaining_count"] <= 0:
                 yield event.plain_result(
-                    f"你从 {sname} 的赏钱中领到了 {amount} 铜钱！赏钱已被领完！寄语：{blessing}"
+                    f"你从 {sname} 的赏钱中领到了 {amount} 铜！赏钱已被领完！寄语：{blessing}"
                 )
             else:
                 yield event.plain_result(
-                    f"你从 {sname} 的赏钱中领到了 {amount} 铜钱！余 {rem_amt} 铜钱，剩余 {rp['remaining_count']} 个 寄语：{blessing}"
+                    f"你从 {sname} 的赏钱中领到了 {amount} 铜！余 {rem_amt} 铜，剩余 {rp['remaining_count']} 个 寄语：{blessing}"
                 )
         # 检查过期赏钱，退回
         expired = self._expire_red_packets()
@@ -1281,7 +1281,7 @@ class MyPlugin(Star):
         raw = self._tail_after_command_names(event, "销").strip()
         m = re.match(r"^(\d+)$", raw)
         if not m:
-            yield event.plain_result("用法：.销 <编号>  删除指定赏钱并退回剩余铜钱")
+            yield event.plain_result("用法：.销 <编号>  删除指定赏钱并退回剩余铜")
             return
         target_short_id = int(m.group(1))
 
@@ -1306,7 +1306,7 @@ class MyPlugin(Star):
             remaining = rp.get("remaining", 0)
             remaining_count = rp.get("remaining_count", 0)
             claimed_count = rp.get("count", 0) - remaining_count
-            # 退回剩余铜钱
+            # 退回剩余铜
             refund_ok = True
             if remaining > 0:
                 refund_ok = await self._mc_add(rp.get("sender_mc", ""), remaining)
@@ -1315,12 +1315,12 @@ class MyPlugin(Star):
             if refund_ok:
                 yield event.plain_result(
                     f"已删除 [{target_short_id}] {sname} 的赏钱\n"
-                    f"已领 {claimed_count} 个，剩余 {remaining_count} 个 / {remaining} 铜钱已退回"
+                    f"已领 {claimed_count} 个，剩余 {remaining_count} 个 / {remaining} 铜已退回"
                 )
             else:
                 yield event.plain_result(
                     f"已删除 [{target_short_id}] {sname} 的赏钱\n"
-                    f"警告：退回 {remaining} 铜钱失败，请手动处理！"
+                    f"警告：退回 {remaining} 铜失败，请手动处理！"
                 )
 
     @filter.command("我的赏钱", desc="查看自己发送的赏钱", alias={"我的赏", "mypackets"})
@@ -1350,8 +1350,8 @@ class MyPlugin(Star):
             rm = rp.get("remaining", 0)
             total = rp.get("total", 0)
             claimed_count = rp.get("count", 0) - rc
-            status = "已领完" if rc <= 0 else f"剩余 {rc} 个 / {rm} 铜钱"
-            lines.append(f"  [{sid}] {bl}（{total} 铜钱 / {claimed_count} 人已领）{status}")
+            status = "已领完" if rc <= 0 else f"剩余 {rc} 个 / {rm} 铜"
+            lines.append(f"  [{sid}] {bl}（{total} 铜 / {claimed_count} 人已领）{status}")
         yield event.plain_result("\n".join(lines))
 
     def _log_transfer(self, sender_qq: str, sender_mc: str, receiver_qq: str, receiver_mc: str, amount: int, balance_after: int | None):
@@ -2081,7 +2081,7 @@ class MyPlugin(Star):
         self._save_apply_data()
         yield event.plain_result(f"已切换主游戏账号为 {mcname}。\n当前绑定：{'、'.join(bound)}")
 
-    @filter.command("mcsign", desc="每日签到领铜钱", alias={"mcqd", "签到", "jrrp"})
+    @filter.command("mcsign", desc="每日签到领铜", alias={"mcqd", "签到", "jrrp"})
     async def mcsign(self, event: AstrMessageEvent):
         if not self.enable_sign:
             yield event.plain_result("抱歉，签到功能未开启。")
@@ -2136,7 +2136,7 @@ class MyPlugin(Star):
         pool = 0
         no_reward_reason = ""
         if not mcname:
-            no_reward_reason = "未绑定MC账号，无法发放铜钱"
+            no_reward_reason = "未绑定MC账号，无法发放铜"
         elif qqid not in yesterday_signers_only:
             no_reward_reason = "昨日未签到，无法领取今日奖励"
         elif yesterday_count > 0:
@@ -2175,7 +2175,7 @@ class MyPlugin(Star):
         ]
         if reward > 0:
             bonus_info = f"  连续加成 {bonus_desc}（基础 {base_reward}）" if bonus_desc else ""
-            lines[0] = f"签到成功！{mcname} +{reward} 铜钱（奖池 {pool} / {yesterday_count} 人{bonus_info}）"
+            lines[0] = f"签到成功！{mcname} +{reward} 铜（奖池 {pool} / {yesterday_count} 人{bonus_info}）"
         lines.append(f"今日 {today_count} 人  |  累计 {total_days} 天  |  连续 {streak} 天  |  最高 {max_streak} 天")
         lines.append(f"今日占卜：{fortune['level']}  幸运色 {fortune['color']}  幸运数字 {fortune['number']}")
         lines.append(f"签文：{fortune['message']}")
@@ -2355,7 +2355,7 @@ class MyPlugin(Star):
             lines.append(row.rstrip())
         yield event.plain_result("\n".join(lines))
 
-    @filter.command("mcsignback", desc="补签（花铜钱补往日签到）", alias={"mcsignbackfill", "mcbq"})
+    @filter.command("mcsignback", desc="补签（花铜补往日签到）", alias={"mcsignbackfill", "mcbq"})
     async def mcsignback(self, event: AstrMessageEvent):
         if not self.enable_sign:
             yield event.plain_result("抱歉，签到功能未开启。")
@@ -2396,7 +2396,7 @@ class MyPlugin(Star):
                 d = int(ds.split("-")[2])
                 days_back = today_d - d
                 day_cost = cost * (2 ** (days_back - 1))
-                lines.append(f"  {ds}  费用 {day_cost} 铜钱")
+                lines.append(f"  {ds}  费用 {day_cost} 铜")
             lines.append("")
             lines.append("用法：/mcsignback 2026-06-10 或 /mcsignback 10")
             yield event.plain_result("\n".join(lines))
@@ -2435,14 +2435,14 @@ class MyPlugin(Star):
             resp_clean = strip_mc_color(resp).strip()
             nums = re.findall(r"[-+]?\d+(?:\.\d+)?", resp_clean)
             if not nums:
-                yield event.plain_result(f"无法解析铜钱库存：{resp_clean}")
+                yield event.plain_result(f"无法解析铜库存：{resp_clean}")
                 return
             balance = int(float(nums[-1]))
         except Exception as e:
             yield event.plain_result(f"查询库存失败：{e}")
             return
         if balance < cost:
-            yield event.plain_result(f"库存不足！补签 {ds} 需要 {cost} 铜钱，你当前有 {balance} 铜钱。")
+            yield event.plain_result(f"库存不足！补签 {ds} 需要 {cost} 铜，你当前有 {balance} 铜。")
             return
         # 扣款
         sub_cmd = f"{self.money_command_prefix} sub {mcname} {cost}"
@@ -2462,7 +2462,7 @@ class MyPlugin(Star):
         max_streak = self._sign_max_consecutive_days(qqid)
         yield event.plain_result(
             f"补签成功！{ds} 已记录签到\n"
-            f"扣款 -{cost} 铜钱\n"
+            f"扣款 -{cost} 铜\n"
             f"连续 {streak} 天  |  最高 {max_streak} 天"
         )
 
@@ -2489,7 +2489,7 @@ class MyPlugin(Star):
             return raw_input
         return ""
 
-    @filter.command("mcmoney", desc="查询铜钱库存", alias={"mcq", "库存"})
+    @filter.command("mcmoney", desc="查询铜库存", alias={"mcq", "库存"})
     async def mcmoney(self, event: AstrMessageEvent):
         qqid = str(event.get_sender_id())
         raw = self._tail_after_command_names(event, "mcmoney", "mcq", "库存")
@@ -2509,7 +2509,7 @@ class MyPlugin(Star):
             else:
                 # 直接 MC 名（管理员查询）
                 if not self.is_admin(qqid):
-                    yield event.plain_result("只有管理员可以查询他人的铜钱库存。")
+                    yield event.plain_result("只有管理员可以查询他人的铜库存。")
                     return
                 targets = [raw]
         else:
@@ -2531,9 +2531,9 @@ class MyPlugin(Star):
                 lines.append(f"  {name}: {cresp if cresp else '(空响应)'}")
             except Exception as e:
                 lines.append(f"  {name}: 查询失败 - {e}")
-        yield event.plain_result("铜钱库存：\n" + "\n".join(lines))
+        yield event.plain_result("铜库存：\n" + "\n".join(lines))
 
-    @filter.command("mctransfer", desc="转账铜钱给其他玩家", alias={"mctrans", "mczz", "投喂"})
+    @filter.command("mctransfer", desc="转账铜给其他玩家", alias={"mctrans", "mczz", "投喂"})
     async def mctransfer(self, event: AstrMessageEvent):
         qqid = str(event.get_sender_id())
         raw = self._tail_after_command_names(event, "mctransfer", "mctrans", "mczz", "投喂")
@@ -2617,11 +2617,11 @@ class MyPlugin(Star):
             resp_clean = strip_mc_color(resp).strip()
             nums = re.findall(r"[-+]?\d+(?:\.\d+)?", resp_clean)
             if not nums:
-                yield event.plain_result(f"无法解析你的铜钱库存：{resp_clean}")
+                yield event.plain_result(f"无法解析你的铜库存：{resp_clean}")
                 return
             balance = int(float(nums[-1]))
             if balance < amount:
-                yield event.plain_result(f"库存不足！你当前有 {balance} 铜钱，需要 {amount}。")
+                yield event.plain_result(f"库存不足！你当前有 {balance} 铜，需要 {amount}。")
                 return
         except Exception as e:
             yield event.plain_result(f"查询库存失败：{e}")
@@ -2653,7 +2653,7 @@ class MyPlugin(Star):
             nums2 = re.findall(r"[-+]?\d+(?:\.\d+)?", resp2_clean)
             if nums2:
                 new_balance = int(float(nums2[-1]))
-                new_balance_str = f"\n当前库存：{new_balance} 铜钱"
+                new_balance_str = f"\n当前库存：{new_balance} 铜"
         except Exception:
             pass
         self._log_transfer(qqid, sender_mc, "", receiver_mc, amount, new_balance)
@@ -2670,7 +2670,7 @@ class MyPlugin(Star):
         except Exception as e:
             logger.warning(f"[mctransfer] 游戏内通知失败: {e}")
         yield event.plain_result(
-            f"{sender_mc} → {receiver_mc}：{amount} 铜钱{new_balance_str}"
+            f"{sender_mc} → {receiver_mc}：{amount} 铜{new_balance_str}"
         )
 
     @filter.command("mckill", desc="MC kill人")
