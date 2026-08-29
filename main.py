@@ -130,7 +130,10 @@ async def mcsm_read_file(panel_url: str, api_key: str, instance_uuid: str, daemo
     try:
         req = urllib.request.Request(
             url, data=body, method="PUT",
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "X-Request-Api-Key": api_key,
+            },
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode("utf-8"))
@@ -420,6 +423,8 @@ class MyPlugin(Star):
         self.sign_admin_file = os.path.join(self.plugin_data_dir, "sign_admin.json")
         self.sign_admin_data = self._load_sign_admin_data()
         self.transfer_log_file = os.path.join(self.plugin_data_dir, "transfer_log.jsonl")
+        self.red_packet_file = os.path.join(self.plugin_data_dir, "red_packets.json")
+        self.red_packets = self._load_red_packets()
         self.mcrun_blocked_first = set(_MCRUN_DEFAULT_BLOCKED_FIRST)
         extra = self.config.get("mcrun_blocked_extra", [])
         if isinstance(extra, list):
@@ -948,6 +953,226 @@ class MyPlugin(Star):
         img.save(buf, format="PNG", optimize=True)
         return buf.getvalue()
 
+    # ── 红包 ───────────────────────────────────────────────
+
+    def _load_red_packets(self) -> dict:
+        if os.path.isfile(self.red_packet_file):
+            try:
+                with open(self.red_packet_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {}
+
+    def _save_red_packets(self):
+        try:
+            with open(self.red_packet_file, "w", encoding="utf-8") as f:
+                json.dump(self.red_packets, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"保存红包数据失败: {e}")
+
+    async def _mc_balance(self, mcname: str) -> int | None:
+        """查询 MC 账户余额，返回整数或 None。"""
+        try:
+            resp = await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password,
+                                      f"{self.money_command_prefix} get {mcname}")
+            clean = strip_mc_color(resp).strip()
+            nums = re.findall(r"[-+]?\d+(?:\.\d+)?", clean)
+            if not nums:
+                return None
+            return int(float(nums[-1]))
+        except Exception:
+            return None
+
+    async def _mc_add(self, mcname: str, amount: int) -> bool:
+        """给 MC 账户加钱。"""
+        try:
+            cmd = self.sign_money_command.replace("{name}", mcname).replace("{amount}", str(amount))
+            await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, cmd)
+            return True
+        except Exception as e:
+            logger.warning(f"加钱失败: {e}")
+            return False
+
+    async def _mc_sub(self, mcname: str, amount: int) -> bool:
+        """从 MC 账户扣钱。"""
+        try:
+            cmd = f"{self.money_command_prefix} sub {mcname} {amount}"
+            await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, cmd)
+            return True
+        except Exception as e:
+            logger.warning(f"扣款失败: {e}")
+            return False
+
+    def _red_packet_expired(self, rp: dict) -> bool:
+        return time.time() > rp.get("expires_at", 0)
+
+    def _expire_red_packets(self):
+        """处理过期红包：剩余金额退回发送者（懒处理，领取时触发）。"""
+        now = time.time()
+        expired_ids = []
+        for rp_id, rp in self.red_packets.items():
+            if rp.get("remaining_count", 0) > 0 and now > rp.get("expires_at", 0):
+                expired_ids.append(rp_id)
+        return expired_ids
+
+    @filter.command("发红包", desc="发红包", alias={"红", "hb"})
+    async def redpacket_send(self, event: AstrMessageEvent):
+        qqid = str(event.get_sender_id())
+        # 检查群聊
+        umo = str(getattr(event, "unified_msg_origin", "") or "")
+        if "GroupMessage" not in umo:
+            yield event.plain_result("发红包请在群聊中使用。")
+            return
+        group_id = str(getattr(event, "group_id", None) or getattr(event, "get_group_id", lambda: None)() or "")
+        if not group_id:
+            yield event.plain_result("无法获取群号。")
+            return
+        # 解析参数: 金额 数量 [祝福语]
+        raw = self._tail_after_command_names(event, "发红包", "红", "hb")
+        parts = raw.strip().split()
+        if len(parts) < 2:
+            yield event.plain_result("用法：.发红包 <总金额> <数量> [祝福语]  例如 .发红包 1000 5")
+            return
+        try:
+            total = int(parts[0])
+            count = int(parts[1])
+        except ValueError:
+            yield event.plain_result("金额和数量必须是整数。")
+            return
+        blessing = " ".join(parts[2:]) if len(parts) > 2 else "恭喜发财"
+        # 校验
+        if total < count:
+            yield event.plain_result("总金额必须大于等于数量（每包至少1铜钱）。")
+            return
+        if count <= 0 or count > 100:
+            yield event.plain_result("红包数量需在 1~100 之间。")
+            return
+        if total <= 0 or total > 100000000:
+            yield event.plain_result("金额需在 1~100000000 之间。")
+            return
+        # 检查绑定
+        bound = self.apply_data.get(qqid, [])
+        if not bound:
+            yield event.plain_result("你还没有绑定MC账号，请先使用 /wantwl 绑定。")
+            return
+        mcname = bound[0]
+        # 查余额
+        balance = await self._mc_balance(mcname)
+        if balance is None:
+            yield event.plain_result("无法查询余额，请稍后再试。")
+            return
+        if balance < total:
+            yield event.plain_result(f"余额不足！你当前有 {balance} 铜钱，需要 {total}。")
+            return
+        # 扣款
+        if not await self._mc_sub(mcname, total):
+            yield event.plain_result("扣款失败，请稍后再试。")
+            return
+        # 创建红包
+        rp_id = f"{int(time.time())}_{qqid}_{len(self.red_packets)}"
+        self.red_packets[rp_id] = {
+            "sender_qq": qqid,
+            "sender_mc": mcname,
+            "group_id": group_id,
+            "total": total,
+            "remaining": total,
+            "count": count,
+            "remaining_count": count,
+            "claimed": {},  # {qqid: amount}
+            "blessing": blessing,
+            "created_at": time.time(),
+            "expires_at": time.time() + 3600,  # 1小时有效
+        }
+        self._save_red_packets()
+        yield event.plain_result(
+            f"🧧 {blessing}\n"
+            f"红包已发出：{total} 铜钱 / {count} 个\n"
+            f"发送 .领红包 即可领取（1小时内有效，每人限领1次）"
+        )
+
+    @filter.command("领红包", desc="领取红包", alias={"领", "hbget"})
+    async def redpacket_claim(self, event: AstrMessageEvent):
+        qqid = str(event.get_sender_id())
+        umo = str(getattr(event, "unified_msg_origin", "") or "")
+        if "GroupMessage" not in umo:
+            yield event.plain_result("领红包请在群聊中使用。")
+            return
+        group_id = str(getattr(event, "group_id", None) or getattr(event, "get_group_id", lambda: None)() or "")
+        if not group_id:
+            yield event.plain_result("无法获取群号。")
+            return
+        # 检查绑定
+        bound = self.apply_data.get(qqid, [])
+        if not bound:
+            yield event.plain_result("你还没有绑定MC账号，请先使用 /wantwl 绑定。")
+            return
+        mcname = bound[0]
+
+        # 找到该群未领完且未过期的红包
+        candidates = []
+        for rp_id, rp in self.red_packets.items():
+            if rp.get("group_id") != group_id:
+                continue
+            if rp.get("remaining_count", 0) <= 0:
+                continue
+            if self._red_packet_expired(rp):
+                continue
+            if qqid in rp.get("claimed", {}):
+                continue
+            if rp.get("sender_qq") == qqid:
+                continue  # 不能领自己的红包
+            candidates.append(rp)
+        if not candidates:
+            yield event.plain_result("当前没有可领取的红包。")
+            return
+        # 取最早的红包
+        rp = min(candidates, key=lambda x: x.get("created_at", 0))
+
+        # 随机分配金额（整数，保证剩余金额精确）
+        remaining_count = rp["remaining_count"]
+        remaining_amount = rp["remaining"]
+        if remaining_count == 1:
+            amount = remaining_amount
+        else:
+            # 每个红包至少1，剩余部分随机
+            max_amt = remaining_amount - (remaining_count - 1)
+            amount = random.randint(1, max_amt)
+        rp["claimed"][qqid] = amount
+        rp["remaining_count"] -= 1
+        rp["remaining"] -= amount
+        self._save_red_packets()
+        # 加钱
+        if not await self._mc_add(mcname, amount):
+            # 加钱失败，回滚领取
+            del rp["claimed"][qqid]
+            rp["remaining_count"] += 1
+            rp["remaining"] += amount
+            self._save_red_packets()
+            yield event.plain_result("发放失败，请稍后再试。")
+            return
+        # 检查是否领完
+        if rp["remaining_count"] <= 0:
+            yield event.plain_result(
+                f"🎉 你领到了 {amount} 铜钱！红包已被领完！"
+            )
+        else:
+            yield event.plain_result(
+                f"🎉 你领到了 {amount} 铜钱！剩余 {rp['remaining_count']} 个"
+            )
+        # 检查过期红包，退回
+        expired = self._expire_red_packets()
+        for rp_id_exp in expired:
+            rp_exp = self.red_packets[rp_id_exp]
+            refund = rp_exp.get("remaining", 0)
+            if refund > 0:
+                await self._mc_add(rp_exp.get("sender_mc", ""), refund)
+                rp_exp["remaining"] = 0
+                rp_exp["remaining_count"] = 0
+                logger.info(f"[红包] 过期退回: {rp_id_exp} 退回 {refund} 给 {rp_exp['sender_qq']}")
+            del self.red_packets[rp_id_exp]
+        self._save_red_packets()
+
     def _log_transfer(self, sender_qq: str, sender_mc: str, receiver_qq: str, receiver_mc: str, amount: int, balance_after: int | None):
         record = {
             "time": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -1113,6 +1338,8 @@ class MyPlugin(Star):
             await asyncio.sleep(1.5)
             try:
                 req = urllib.request.Request(base_url)
+                # MCSM v10 认证 header
+                req.add_header("X-Request-Api-Key", self.mcsm_api_key)
                 with urllib.request.urlopen(req, timeout=10) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                 log_text = data.get("data", "")
@@ -1382,6 +1609,8 @@ class MyPlugin(Star):
                 "  [管] /mcsignadmin  签到数据管理（msa）",
                 "  /mcmoney  查询库存（mcqian）",
                 "  /mctransfer <游戏ID> <数量>  投喂（mczz）",
+                "  /发红包 <金额> <数量>  发红包（红）",
+                "  /领红包  领取红包（领）",
                 "",
                 "【其他】",
                 "  [管] /mckill <游戏ID>  击杀",
@@ -2039,28 +2268,7 @@ class MyPlugin(Star):
         except Exception as e:
             yield event.plain_result(f"扣款失败：{e}")
             return
-        # 发放补签奖励（仅基于次日正常签到人数，不含补签）
-        next_day = (target_date + timedelta(days=1)).strftime("%Y-%m-%d")
-        next_day_signers_only = self._get_signers_only(next_day)
-        yesterday_count = len(next_day_signers_only)
-        reward = 0
-        if yesterday_count > 0:
-            pool = random.randint(self.sign_money_min, self.sign_money_max)
-            reward = pool // yesterday_count
-            if reward > 0:
-                add_cmd = self.sign_money_command.replace("{name}", mcname).replace("{amount}", str(reward))
-                try:
-                    await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, add_cmd)
-                except Exception as e:
-                    # 奖励发放失败，回滚扣款
-                    rollback = f"{self.money_command_prefix} add {mcname} {cost}"
-                    try:
-                        await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, rollback)
-                    except Exception:
-                        pass
-                    yield event.plain_result(f"发放奖励失败，已回滚扣款：{e}")
-                    return
-        # 记录补签（写入 backfill 列表，不混入 signers）
+        # 记录补签（写入 backfill 列表，不混入 signers，无奖励）
         entry = self.sign_data.get(ds, {"signers": [], "backfill": []})
         if not isinstance(entry, dict):
             entry = {"signers": list(entry) if isinstance(entry, list) else [], "backfill": []}
@@ -2069,10 +2277,9 @@ class MyPlugin(Star):
         self._save_sign_data()
         streak = self._sign_consecutive_days(qqid)
         max_streak = self._sign_max_consecutive_days(qqid)
-        net = reward - cost
         yield event.plain_result(
             f"补签成功！{ds} 已记录签到\n"
-            f"扣款 -{cost} 铜钱  |  奖励 +{reward} 铜钱  |  净变动 {net:+d}\n"
+            f"扣款 -{cost} 铜钱\n"
             f"连续 {streak} 天  |  最高 {max_streak} 天"
         )
 
