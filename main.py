@@ -2382,22 +2382,21 @@ class MyPlugin(Star):
             yield event.plain_result("你还没有绑定MC账号，请先使用 /wantwl <游戏ID> 绑定。")
             return
         mcname = bound[0]
-        # /mcsignback 2026-06-13  或  /mcsignback 13（默认本月）
+        # /mcsignback 2026-06-13  或  /mcsignback 13（最近30天内的某日）
         raw = self._tail_after_command_names(event, "mcsignback", "mcsignbackfill", "mcbq")
         if not raw.strip():
             cost = self.sign_backfill_cost_per_day
-            # 列出本月可补签的日期
+            # 列出最近30天可补签的日期
             now = datetime.now()
-            year, month = now.year, now.month
-            total = calendar.monthrange(year, month)[1]
-            today_d = now.day
+            today = now.date()
             missed = []
-            for d in range(1, today_d):
-                ds = f"{year}-{month:02d}-{d:02d}"
+            for i in range(1, 31):
+                d = today - timedelta(days=i)
+                ds = d.strftime("%Y-%m-%d")
                 if qqid not in self._get_all_signed_qqids(ds):
                     missed.append(ds)
             if not missed:
-                yield event.plain_result("本月至今没有漏签，太棒了！")
+                yield event.plain_result("最近30天没有漏签，太棒了！")
                 return
             streak = self._sign_consecutive_days(qqid)
             max_streak = self._sign_max_consecutive_days(qqid)
@@ -2406,15 +2405,14 @@ class MyPlugin(Star):
                 f"补签费用： 基础费用{cost} × 2^(天数-1) /天",
                 f"当前连续 {streak} 天  |  最高 {max_streak} 天",
                 "",
-                f"可补签日期（{len(missed)} 天）：",
+                f"可补签日期（{len(missed)} 天，最近30天内）：",
             ]
             for ds in missed:
-                d = int(ds.split("-")[2])
-                days_back = today_d - d
+                days_back = (today - datetime.strptime(ds, "%Y-%m-%d").date()).days
                 day_cost = cost * (2 ** (days_back - 1))
                 lines.append(f"  {ds}  费用 {day_cost} 铜")
             lines.append("")
-            lines.append("用法：/mcsignback 2026-06-10 或 /mcsignback 10")
+            lines.append("用法：/mcsignback 2026-08-10 或 /mcsignback 20（本月的某天）")
             yield event.plain_result("\n".join(lines))
             return
         # 解析目标日期
@@ -2435,8 +2433,9 @@ class MyPlugin(Star):
         if target_date >= today:
             yield event.plain_result("只能补签过去的日期。今天的签到请用 /mcsign")
             return
-        if target_date.month != today.month or target_date.year != today.year:
-            yield event.plain_result("只能补签本月的日期。")
+        # 只允许补签最近30天内的日期
+        if (today - target_date).days > 30:
+            yield event.plain_result("只能补签最近30天内的日期。")
             return
         ds = target_date.strftime("%Y-%m-%d")
         if qqid in self._get_all_signed_qqids(ds):
