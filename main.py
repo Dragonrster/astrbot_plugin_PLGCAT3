@@ -2374,7 +2374,7 @@ class MyPlugin(Star):
         return self.sign_backfill_cost_per_day + max(0, days_back - 1) * self.sign_backfill_step
 
     async def _generate_sign_backfill_list(self, mcname: str, missed: list[str], streak: int, max_streak: int) -> bytes | None:
-        """生成补签列表图片（HTML 模板 → PNG）。"""
+        """生成补签列表图片（优先 HTML 模板，兜底 PIL 直接绘制，不依赖浏览器）。"""
         if _HAS_JINJA2:
             tpl_html = _load_template("sign_backfill_template.html")
             if tpl_html:
@@ -2400,7 +2400,44 @@ class MyPlugin(Star):
                         return img_bytes
                 except Exception as e:
                     logger.warning(f"[mcsignback] 模板渲染失败: {e}")
-        return None
+        # PIL 兜底：纯 python 绘制，无外部依赖
+        if not _HAS_PIL:
+            return None
+        try:
+            from PIL import Image, ImageDraw
+            now = datetime.now()
+            today = now.date()
+            base = self.sign_backfill_cost_per_day
+            step = self.sign_backfill_step
+            rows = len(missed)
+            row_h = 30
+            pad = 16
+            w = 420
+            h = 90 + rows * row_h + 40
+            img = Image.new("RGB", (w, h), "#FFF8E1")
+            draw = ImageDraw.Draw(img)
+            font = _get_sign_cal_font(14, self.sign_cal_font_cache_dir, self.sign_cal_font_path)
+            font_b = _get_sign_cal_font(20, self.sign_cal_font_cache_dir, self.sign_cal_font_path)
+            # 标题
+            draw.rectangle([0, 0, w, 55], fill="#FF6F00")
+            draw.text((pad, 10), "补签列表", fill="#FFFFFF", font=font_b)
+            draw.text((pad, 34), f"{mcname}  |  连续 {streak} 天  |  最高 {max_streak} 天", fill="#FFE0B2", font=font)
+            draw.text((pad, 60), f"费用：基础 {base} 铜 + 往前每天 +{step} 铜", fill="#E65100", font=font)
+            y = 84
+            for ds in missed:
+                d = datetime.strptime(ds, "%Y-%m-%d").date()
+                days_back = (today - d).days
+                cost = self._sign_backfill_cost(days_back)
+                draw.text((pad, y), ds, fill="#333333", font=font_b)
+                draw.text((pad + 130, y + 4), f"{days_back}天前", fill="#999999", font=font)
+                draw.text((w - pad - 90, y + 4), f"{cost} 铜", fill="#E65100", font=font_b)
+                y += row_h
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            return buf.getvalue()
+        except Exception as e:
+            logger.warning(f"[mcsignback] PIL 绘制失败: {e}")
+            return None
 
     @filter.command("mcsignback", desc="补签（花铜补往日签到）", alias={"mcsignbackfill", "mcbq"})
     async def mcsignback(self, event: AstrMessageEvent):
