@@ -386,7 +386,7 @@ async def rcon_command(
 
 
 @register(
-    "PLG_CAT3", "Dragonrster", "MC服务器管理插件：白名单、封禁、聊天转发、签到经济、RCON命令", "1.1.0"
+    "PLG_CAT3", "Dragonrster", "MC服务器管理插件：白名单、封禁、聊天转发、签到经济、RCON命令", "1.1.6"
 )
 class MyPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):

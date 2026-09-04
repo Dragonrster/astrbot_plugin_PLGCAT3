@@ -162,7 +162,7 @@
   "sign_backfill_step": {
     "description": "补签每往前一天增加的费用（铜钱）",
     "type": "int",
-    "default": 50,
+    "default": 100,
     "hint": "线性递增：第N天前 = 基础 + (N-1)×步进"
   },
   "sign_streak_bonus": {
