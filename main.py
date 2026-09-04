@@ -836,7 +836,7 @@ class MyPlugin(Star):
             draw.text((30, y + 30), f"+{reward}", fill="#E65100", font=font_big)
             bw = draw.textbbox((0, 0), f"+{reward}", font=font_big)
             info_parts = [f"奖池 {pool} / {yesterday_count} 人 = 基础 {base_reward}"]
-            day_bonus = total_days * self.sign_day_bonus
+            day_bonus = min(total_days * self.sign_day_bonus, 5000)
             if day_bonus > 0:
                 info_parts.append(f"累计加成 +{day_bonus}")
             if bonus_desc:
@@ -2151,7 +2151,7 @@ class MyPlugin(Star):
                 base_reward = pool // yesterday_count
             else:
                 base_reward = 0
-            day_bonus = total_days * self.sign_day_bonus  # 每累计签到一天 +20
+            day_bonus = min(total_days * self.sign_day_bonus, 5000)  # 每累计签到一天 +20，封顶5000
             reward = int((base_reward + day_bonus) * bonus_mult)
             cmd = self.sign_money_command.replace("{name}", mcname).replace("{amount}", str(reward))
             try:
