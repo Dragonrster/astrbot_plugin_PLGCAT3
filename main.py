@@ -416,6 +416,7 @@ class MyPlugin(Star):
         self.sign_money_command = str(self.config.get("sign_money_command", "d money add {name} {amount}"))
         self.money_command_prefix = str(self.config.get("money_command_prefix", "d money"))
         self.sign_backfill_cost_per_day = int(self.config.get("sign_backfill_cost_per_day", 50))
+        self.sign_day_bonus = int(self.config.get("sign_day_bonus", 20))  # 累计签到每天加成
         self.sign_cal_font_path = str(self.config.get("sign_cal_font_path", "") or "").strip()
         self.sign_cal_font_cache_dir = os.path.join(self.plugin_data_dir, "fonts")
         self.sign_file = os.path.join(self.plugin_data_dir, "sign_data.json")
@@ -834,12 +835,12 @@ class MyPlugin(Star):
             draw.text((30, y + 8), "获得铜", fill="#666666", font=font)
             draw.text((30, y + 30), f"+{reward}", fill="#E65100", font=font_big)
             bw = draw.textbbox((0, 0), f"+{reward}", font=font_big)
-            info_parts = [f"奖池 {pool} / {yesterday_count} 人"]
-            if bonus_desc and base_reward > 0:
-                info_parts.append(f"连续加成 {bonus_desc}（基础 {base_reward}）")
+            info_parts = [f"基础 {base_reward} + 累计加成 {pool}"]
+            if bonus_desc:
+                info_parts.append(f"连续加成 {bonus_desc}")
             draw.text((30 + (bw[2] - bw[0]) + 10, y + 42), "  |  ".join(info_parts), fill="#999999", font=font)
         else:
-            draw.text((30, y + 20), "昨日无人签到，今日无奖励", fill="#999999", font=font)
+            draw.text((30, y + 20), no_reward_reason or "签到成功", fill="#999999", font=font)
         y += 95
         bonus_pct = bonus_desc if bonus_desc else "无"
         stats = [("今日签到", f"{today_count} 人"), ("累计签到", f"{total_days} 天"), ("连续签到", f"{streak} 天"), ("最高记录", f"{max_streak} 天"), ("收益加成", bonus_pct)]
@@ -1197,7 +1198,6 @@ class MyPlugin(Star):
                     rc = rp.get("remaining_count", 0)
                     rm = rp.get("remaining", 0)
                     lines.append(f"  [{sid}] {sname}：{bl}（剩 {rc} 个 / {rm} 铜）")
-                lines.append("")
                 lines.append("发送 .领 <號> 领取指定赏钱")
                 yield event.plain_result("\n".join(lines))
                 return
@@ -1247,7 +1247,7 @@ class MyPlugin(Star):
                 )
             else:
                 yield event.plain_result(
-                    f"你从 {sname} 的赏钱中领到了 {amount} 铜！余 {rem_amt} 铜/ {rp['remaining_count']} 个 寄语：{blessing}"
+                    f"你从 {sname} 的赏钱中领到了 {amount} 铜！余 {rem_amt} 铜 / {rp['remaining_count']} 个 寄语：{blessing}"
                 )
         # 检查过期赏钱，退回
         expired = self._expire_red_packets()
@@ -1339,7 +1339,7 @@ class MyPlugin(Star):
         if not mine:
             yield event.plain_result("你还没有在本群发过赏钱。")
             return
-        lines = [" 我发送的赏钱："]
+        lines = [" 如下："]
         for rp in mine:
             sid = rp.get("short_id", "?")
             bl = rp.get("blessing", "")
@@ -1751,11 +1751,9 @@ class MyPlugin(Star):
         text = "\n".join(
             [
                 "═══ MC 管理插件 ═══",
-                "[管] = 需管理员权限  |  别名写在括号内",
-                "",
                 "【白名单】",
                 "  /mcwl <add|remove|list> [游戏ID]  白名单管理（mcwhitelist）",
-                "  /wantwl <游戏ID>  申请绑定（私聊）",
+                "  /wantwl <游戏ID>  申请绑定",
                 "  /wantwllist  查看绑定（wantwll）",
                 "  /wantwlunbind <游戏ID>  解绑（wantwlu）",
                 "  /mcmainsign [游戏ID]  切换主游戏账号（mcmain）",
@@ -1772,13 +1770,13 @@ class MyPlugin(Star):
                 "  /mclist  在线玩家（mcl）",
                 "  /mcplugins  插件列表",
                 "  [管] /mctps  TPS",
-                "  [管] /mcsparkhealth  Spark 健康（mcspark）",
-                "  [管] /mcping [目标]  ping（mcp）",
+                "  [管] /mcsparkhealth （mcspark）",
+                "  [管] /mcping [目标] ping（mcp）",
                 "  [管] /mcentitylist [选择器] [世界]  实体列表（mcel）",
                 "",
                 "【聊天】",
-                "  /mcsay <内容>  游戏内说话（mcs）",
-                "  [管] /mcbroadcast <内容>  广播（mcb）",
+                "  /mcsay <内容>（mcs）",
+                "  [管] /mcbroadcast <内容>（mcb）",
                 "",
                 "【经济】",
                 f"  /mcsign  每日签到+占卜（{sign}，mcqd）",
@@ -1793,7 +1791,7 @@ class MyPlugin(Star):
                 "  [管] /销 <编号>  删除指定赏钱并退回",
                 "",
                 "【其他】",
-                "  [管] /mckill <游戏ID>  击杀",
+                "  [管] /mckill <游戏ID> ",
                 "  [管] /mcrun <命令>  RCON 透传（mcexec）",
                 "  [管] /mcauthunregister <游戏ID>  AuthMe 注销",
                 "  [管] /mcbindchat  绑定聊天转发",
@@ -2130,31 +2128,25 @@ class MyPlugin(Star):
         total_days += 1  # 刚签到，累计+1
         reward = 0
         base_reward = 0
-        pool = 0
+        day_bonus = 0
         no_reward_reason = ""
         if not mcname:
             no_reward_reason = "未绑定MC账号，无法发放铜"
-        elif qqid not in yesterday_signers_only:
-            no_reward_reason = "昨日未签到，无法领取今日奖励"
-        elif yesterday_count > 0:
-            pool = random.randint(self.sign_money_min, self.sign_money_max)
-            base_reward = pool // yesterday_count
-            if base_reward > 0:
-                reward = int(base_reward * bonus_mult)
-                cmd = self.sign_money_command.replace("{name}", mcname).replace("{amount}", str(reward))
-                try:
-                    await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, cmd)
-                except Exception as e:
-                    yield event.plain_result(f"签到失败：{e}")
-                    return
-            else:
-                no_reward_reason = "昨日签到人数过多，奖池不足以平分"
         else:
-            no_reward_reason = "昨日无人签到，今日无奖励"
+            # 第一天即可领取：基础随机 + 累计天数×每天加成 + 连续签到加成
+            base_reward = random.randint(self.sign_money_min, self.sign_money_max)
+            day_bonus = total_days * self.sign_day_bonus  # 每累计签到一天 +20
+            reward = int((base_reward + day_bonus) * bonus_mult)
+            cmd = self.sign_money_command.replace("{name}", mcname).replace("{amount}", str(reward))
+            try:
+                await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, cmd)
+            except Exception as e:
+                yield event.plain_result(f"签到失败：{e}")
+                return
 
         # 尝试图片卡片
         card_img = self._generate_sign_card(
-            user_name, mcname, reward, pool, yesterday_count,
+            user_name, mcname, reward, day_bonus, yesterday_count,
             today_count, streak, max_streak, fortune, no_reward_reason,
             base_reward, bonus_desc, total_days,
         )
@@ -2171,8 +2163,8 @@ class MyPlugin(Star):
             f"签到成功！{'（' + no_reward_reason + '）' if no_reward_reason else ''}",
         ]
         if reward > 0:
-            bonus_info = f"  连续加成 {bonus_desc}（基础 {base_reward}）" if bonus_desc else ""
-            lines[0] = f"签到成功！{mcname} +{reward} 铜（奖池 {pool} / {yesterday_count} 人{bonus_info}）"
+            bonus_info = f"  |  连续加成 {bonus_desc}" if bonus_desc else ""
+            lines[0] = f"签到成功！{mcname} +{reward} 铜（基础 {base_reward} + 累计加成 {day_bonus}{bonus_info}）"
         lines.append(f"今日 {today_count} 人  |  累计 {total_days} 天  |  连续 {streak} 天  |  最高 {max_streak} 天")
         lines.append(f"今日占卜：{fortune['level']}  幸运色 {fortune['color']}  幸运数字 {fortune['number']}")
         lines.append(f"签文：{fortune['message']}")
