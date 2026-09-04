@@ -416,8 +416,7 @@ class MyPlugin(Star):
         self.sign_money_command = str(self.config.get("sign_money_command", "d money add {name} {amount}"))
         self.money_command_prefix = str(self.config.get("money_command_prefix", "d money"))
         self.sign_backfill_cost_per_day = int(self.config.get("sign_backfill_cost_per_day", 50))
-        self.sign_day_bonus = int(self.config.get("sign_day_bonus", 20))  # 累计签到每天加成
-        self.sign_streak_bonus = int(self.config.get("sign_streak_bonus", 20))  # 连续签到每天加成
+        self.sign_streak_bonus = int(self.config.get("sign_streak_bonus", 20))  # 连续签到每连续一天加成
         self.sign_cal_font_path = str(self.config.get("sign_cal_font_path", "") or "").strip()
         self.sign_cal_font_cache_dir = os.path.join(self.plugin_data_dir, "fonts")
         self.sign_file = os.path.join(self.plugin_data_dir, "sign_data.json")
@@ -616,10 +615,10 @@ class MyPlugin(Star):
         return max(calculated, admin_override)
 
     def _sign_streak_bonus_value(self, streak: int) -> tuple[int, str]:
-        """连续签到加成：每连续一天 +sign_streak_bonus（固定加值）。返回 (加成值, 描述)。"""
-        if streak <= 1:
+        """连续签到加成：连续 N 天 = N × sign_streak_bonus，封顶 5000。返回 (加成值, 描述)。"""
+        if streak <= 0:
             return 0, ""
-        val = (streak - 1) * self.sign_streak_bonus
+        val = min(streak * self.sign_streak_bonus, 5000)
         return val, f"+{val}"
 
     @staticmethod
@@ -833,23 +832,27 @@ class MyPlugin(Star):
             draw.text((30, y + 8), f"+{reward}", fill="#E65100", font=font_big)
             bw = draw.textbbox((0, 0), f"+{reward}", font=font_big)
             info_parts = [f"奖池 {pool} / {yesterday_count} 人 = 基础 {base_reward}"]
-            day_bonus = min(total_days * self.sign_day_bonus, 5000)
-            if day_bonus > 0:
-                info_parts.append(f"累计加成 +{day_bonus}")
             if bonus_desc:
                 info_parts.append(f"连续加成 {bonus_desc}")
             draw.text((30 + (bw[2] - bw[0]) + 10, y + 42), "  |  ".join(info_parts), fill="#999999", font=font)
         else:
             draw.text((30, y + 20), no_reward_reason or "签到成功", fill="#999999", font=font)
         y += 95
-        bonus_pct = bonus_desc if bonus_desc else "无"
-        stats = [("今日签到", f"{today_count} 人"), ("累计签到", f"{total_days} 天"), ("连续签到", f"{streak} 天"), ("最高记录", f"{max_streak} 天"), ("收益加成", bonus_pct)]
+        # 连续加成 = 连续签到 N 天 × sign_streak_bonus（封顶5000）
+        streak_val = min(streak * self.sign_streak_bonus, 5000) if streak > 0 else 0
+        stats = [
+            ("今日签到", f"{today_count} 人"),
+            ("累计签到", f"{total_days} 天"),
+            ("连续签到", f"{streak} 天"),
+            ("最高记录", f"{max_streak} 天"),
+            ("连续加成", f"+{streak_val}" if streak_val else "无"),
+        ]
         col_w = (w - 40) // 5
         for i, (label, val) in enumerate(stats):
             cx = 20 + i * col_w
             draw.rectangle([cx, y, cx + col_w - 6, y + 55], fill="#F5F5F5", outline="#E0E0E0", width=1)
             draw.text((cx + 8, y + 6), label, fill="#999999", font=font)
-            draw.text((cx + 8, y + 26), val, fill="#4CAF50" if i == 4 else "#333333", font=font_title)
+            draw.text((cx + 8, y + 26), val, fill="#4CAF50" if i in (3, 4) else "#333333", font=font_title)
         y += 70
         draw.rectangle([15, y, w - 15, y + 150], fill="#F3E5F5", outline="#CE93D8", width=2)
         draw.text((30, y + 10), "今日占卜", fill="#7B1FA2", font=font_title)
@@ -1754,26 +1757,26 @@ class MyPlugin(Star):
                 "[管] = 需管理员  |  别名写在括号内",
                 "",
                 "【赏钱】",
-                "  /赏 <金额> <数量> [寄语]  发赏钱（最低1000，每包均值≥100）",
-                "  /领 [编号]  领赏钱，无编号=查看列表",
-                "  /我的赏钱  我发出的赏钱",
-                "  [管] /销 <编号>  删除赏钱并退回剩余",
+                "  /赏 <金额> <数量> [寄语]  ",
+                "  /领 [编号]",
+                "  /我的赏钱  查看自己发送的赏钱",
+                "  [管] /销 <编号>  ",
                 "",
                 "【签到经济】",
-                f"  /mcsign  每日签到+占卜（签到/mcqd/jrrp）{sign}",
-                "  /mcsigncal  签到日历（mcsigncalendar/mcqc）",
-                "  /mcsignback [日期]  补签（mcsignbackfill/mcbq）",
-                "  /mcmoney  查询铜库存（库存/mcq）",
-                "  /mctransfer <游戏ID> <数量>  投喂转账（投喂/mctrans/mczz）",
-                "  [管] /mcsignreset  重置签到记录（mcsignr）",
-                "  [管] /mcsignadmin  签到数据管理（msa）",
+                f"  /mcsign  每日签到+占卜（/签到，/mcqd，/jrrp）{sign}",
+                "  /mcsigncal  签到日历（/mcqc）",
+                "  /mcsignback [日期]  补签（/mcbq）",
+                "  /mcmoney  查询铜库存（/库存，/mcq）",
+                "  /mctransfer <游戏ID> <数量>  投喂转账（/投喂，/mctrans，/mczz）",
+                "  [管] /mcsignreset  重置签到记录（/mcsignr）",
+                "  [管] /mcsignadmin  签到数据管理（/msa）",
                 "",
                 "【白名单】",
-                "  /wantwl <游戏ID>  申请绑定（绑定）",
-                "  /wantwllist  查看已绑定（wantwll）",
-                "  /wantwlunbind <游戏ID>  解绑（解绑/wantwlu）",
-                "  /mcmainsign [游戏ID]  切换主号（mcmain/mcswitch）",
-                "  [管] /mcwl <add|remove|list> [游戏ID]  白名单管理（mcwhitelist）",
+                "  /wantwl <游戏ID>  申请绑定（/绑定）",
+                "  /wantwllist  查看已绑定（/wantwll）",
+                "  /wantwlunbind <游戏ID>  解绑（/解绑，/wantwlu）",
+                "  /mcmainsign [游戏ID]  切换主号（/mcmain，/mcswitch）",
+                "  [管] /mcwl <add|remove|list> [游戏ID]  白名单管理（/mcwhitelist）",
                 "",
                 "【封禁/管理】",
                 "  [管] /mcban <游戏ID> [原因]  封禁",
@@ -2098,7 +2101,9 @@ class MyPlugin(Star):
         max_streak = self._sign_max_consecutive_days(qqid)
         fortune = self._generate_fortune(qqid, today)
         total_days = self._get_total_sign_days(qqid)
-        streak_bonus, streak_desc = self._sign_streak_bonus_value(streak)
+        # 连续加成：连续 N 天 = N × sign_streak_bonus（封顶5000），N 含今天
+        streak_today = self._sign_consecutive_days(qqid)
+        streak_bonus, streak_desc = self._sign_streak_bonus_value(streak_today)
 
         if qqid in self._get_all_signed_qqids(today):
             # 已签到，尝试图片卡片
@@ -2129,10 +2134,12 @@ class MyPlugin(Star):
         self._save_sign_data()
         today_count = len(today_entry["signers"]) + len(today_entry.get("backfill", []))
         total_days += 1  # 刚签到，累计+1
+        # 刚签到后重算连续天数（含今天）
+        streak = self._sign_consecutive_days(qqid)
+        streak_bonus, streak_desc = self._sign_streak_bonus_value(streak)
         reward = 0
         pool = 0
         base_reward = 0
-        day_bonus = 0
         no_reward_reason = ""
         if not mcname:
             no_reward_reason = "未绑定MC账号，无法发放铜"
@@ -2146,13 +2153,13 @@ class MyPlugin(Star):
                 pool = random.randint(self.sign_money_min, self.sign_money_max)
                 self.sign_data[pool_key] = pool
                 self._save_sign_data()
-            # 基础 = 今日奖池 ÷ 昨日签到人数（昨日无人则为0，仍有累计加成保底）
+            # 基础 = 今日奖池 ÷ 昨日签到人数（昨日无人则为0，仍有连续加成保底）
             if yesterday_count > 0:
                 base_reward = pool // yesterday_count
             else:
                 base_reward = 0
-            day_bonus = min(total_days * self.sign_day_bonus, 5000)  # 每累计签到一天 +20，封顶5000
-            reward = int(base_reward + day_bonus + streak_bonus)
+            # 奖励 = 基础 + 连续天数加成（连续 N 天 × 20，封顶5000）
+            reward = int(base_reward + streak_bonus)
             cmd = self.sign_money_command.replace("{name}", mcname).replace("{amount}", str(reward))
             try:
                 await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, cmd)
@@ -2182,8 +2189,6 @@ class MyPlugin(Star):
             parts_info = [f"奖池 {pool} / {yesterday_count} 人"]
             if base_reward > 0:
                 parts_info.append(f"基础 {base_reward}")
-            if day_bonus > 0:
-                parts_info.append(f"累计加成 +{day_bonus}")
             if streak_bonus > 0:
                 parts_info.append(f"连续加成 +{streak_bonus}")
             lines[0] = f"签到成功！{mcname} +{reward} 铜（{'  '.join(parts_info)}）"

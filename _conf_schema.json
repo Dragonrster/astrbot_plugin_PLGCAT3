@@ -160,13 +160,8 @@
     "default": 50,
     "hint": "越早越贵：第N天前 = 基础 × 2^(N-1)"
   },
-  "sign_day_bonus": {
-    "description": "签到累计天数加成（每累计签到一天额外加多少铜钱，封顶5000）",
-    "type": "int",
-    "default": 20
-  },
   "sign_streak_bonus": {
-    "description": "连续签到固定加成（每连续一天额外加多少铜钱）",
+    "description": "签到连续天数加成（连续N天 = N × 该值，封顶5000）",
     "type": "int",
     "default": 20
   },
