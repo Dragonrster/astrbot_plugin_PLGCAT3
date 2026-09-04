@@ -835,7 +835,10 @@ class MyPlugin(Star):
             draw.text((30, y + 8), "获得铜", fill="#666666", font=font)
             draw.text((30, y + 30), f"+{reward}", fill="#E65100", font=font_big)
             bw = draw.textbbox((0, 0), f"+{reward}", font=font_big)
-            info_parts = [f"基础 {base_reward} + 累计加成 {pool}"]
+            info_parts = [f"奖池 {pool} / {yesterday_count} 人 = 基础 {base_reward}"]
+            day_bonus = total_days * self.sign_day_bonus
+            if day_bonus > 0:
+                info_parts.append(f"累计加成 +{day_bonus}")
             if bonus_desc:
                 info_parts.append(f"连续加成 {bonus_desc}")
             draw.text((30 + (bw[2] - bw[0]) + 10, y + 42), "  |  ".join(info_parts), fill="#999999", font=font)
@@ -2127,14 +2130,27 @@ class MyPlugin(Star):
         today_count = len(today_entry["signers"]) + len(today_entry.get("backfill", []))
         total_days += 1  # 刚签到，累计+1
         reward = 0
+        pool = 0
         base_reward = 0
         day_bonus = 0
         no_reward_reason = ""
         if not mcname:
             no_reward_reason = "未绑定MC账号，无法发放铜"
         else:
-            # 第一天即可领取：基础随机 + 累计天数×每天加成 + 连续签到加成
-            base_reward = random.randint(self.sign_money_min, self.sign_money_max)
+            # 今日奖池：当天第一次签到人生成，之后固定（所有人平分相同基础）
+            pool_key = f"{today}_pool"
+            saved_pool = self.sign_data.get(pool_key)
+            if isinstance(saved_pool, (int, float)):
+                pool = int(saved_pool)
+            else:
+                pool = random.randint(self.sign_money_min, self.sign_money_max)
+                self.sign_data[pool_key] = pool
+                self._save_sign_data()
+            # 基础 = 今日奖池 ÷ 昨日签到人数（昨日无人则为0，仍有累计加成保底）
+            if yesterday_count > 0:
+                base_reward = pool // yesterday_count
+            else:
+                base_reward = 0
             day_bonus = total_days * self.sign_day_bonus  # 每累计签到一天 +20
             reward = int((base_reward + day_bonus) * bonus_mult)
             cmd = self.sign_money_command.replace("{name}", mcname).replace("{amount}", str(reward))
@@ -2146,7 +2162,7 @@ class MyPlugin(Star):
 
         # 尝试图片卡片
         card_img = self._generate_sign_card(
-            user_name, mcname, reward, day_bonus, yesterday_count,
+            user_name, mcname, reward, pool, yesterday_count,
             today_count, streak, max_streak, fortune, no_reward_reason,
             base_reward, bonus_desc, total_days,
         )
@@ -2163,8 +2179,14 @@ class MyPlugin(Star):
             f"签到成功！{'（' + no_reward_reason + '）' if no_reward_reason else ''}",
         ]
         if reward > 0:
-            bonus_info = f"  |  连续加成 {bonus_desc}" if bonus_desc else ""
-            lines[0] = f"签到成功！{mcname} +{reward} 铜（基础 {base_reward} + 累计加成 {day_bonus}{bonus_info}）"
+            parts_info = [f"奖池 {pool} / {yesterday_count} 人"]
+            if base_reward > 0:
+                parts_info.append(f"基础 {base_reward}")
+            if day_bonus > 0:
+                parts_info.append(f"累计加成 +{day_bonus}")
+            if bonus_desc:
+                parts_info.append(f"连续加成 {bonus_desc}")
+            lines[0] = f"签到成功！{mcname} +{reward} 铜（{'  '.join(parts_info)}）"
         lines.append(f"今日 {today_count} 人  |  累计 {total_days} 天  |  连续 {streak} 天  |  最高 {max_streak} 天")
         lines.append(f"今日占卜：{fortune['level']}  幸运色 {fortune['color']}  幸运数字 {fortune['number']}")
         lines.append(f"签文：{fortune['message']}")

@@ -75,7 +75,8 @@ body { font-family: "Noto Sans SC", "Microsoft YaHei", "PingFang SC", "WenQuanYi
   <div class="label">获得铜钱</div>
   <span class="amount">+{{ reward }}</span>
   <span class="info">
-    基础 {{ base_reward }} + 累计加成 {{ pool }}
+    奖池 {{ pool }} / {{ yesterday_count }} 人 = 基础 {{ base_reward }}
+    ｜ 累计加成 +{{ total_days * 20 }}
     {% if bonus_desc %} ｜ 连续加成 {{ bonus_desc }}{% endif %}
   </span>
 </div>
