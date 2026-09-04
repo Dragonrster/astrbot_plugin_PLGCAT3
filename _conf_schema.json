@@ -155,10 +155,15 @@
     "hint": "查询拼接为: {prefix} get {name}"
   },
   "sign_backfill_cost_per_day": {
-    "description": "补签基础费用（铜钱/天）",
+    "description": "补签基础费用（铜钱）",
+    "type": "int",
+    "default": 50
+  },
+  "sign_backfill_step": {
+    "description": "补签每往前一天增加的费用（铜钱）",
     "type": "int",
     "default": 50,
-    "hint": "越早越贵：第N天前 = 基础 × 2^(N-1)"
+    "hint": "线性递增：第N天前 = 基础 + (N-1)×步进"
   },
   "sign_streak_bonus": {
     "description": "签到连续天数加成（连续N天 = N × 该值，封顶5000）",

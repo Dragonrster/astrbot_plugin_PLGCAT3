@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: "Noto Sans SC", "Microsoft YaHei", "PingFang SC", "WenQuanYi Zen Hei", sans-serif; width: 420px; background: #fff; padding: 14px 16px; }
+
+.header { background: linear-gradient(135deg, #ff8f00 0%, #ff6f00 100%); border-radius: 10px; padding: 12px 16px; }
+.header .title { font-size: 18px; font-weight: bold; color: #fff; }
+.header .sub { font-size: 11px; color: #ffe0b2; margin-top: 3px; }
+
+.fee-info { font-size: 12px; color: #e65100; margin: 8px 2px; }
+.fee-info b { font-size: 13px; }
+
+.list { margin-top: 4px; }
+.row { display: flex; align-items: center; padding: 7px 10px; border-bottom: 1px solid #f5f5f5; }
+.row:nth-child(odd) { background: #fafafa; }
+.row .date { font-size: 14px; font-weight: bold; color: #333; width: 100px; }
+.row .rel { font-size: 11px; color: #999; width: 60px; }
+.row .cost { font-size: 14px; font-weight: bold; color: #e65100; margin-left: auto; }
+.row .cost small { font-weight: normal; color: #999; }
+
+.footer { text-align: center; padding: 8px 0 2px; font-size: 11px; color: #bbb; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="title">📋 补签列表</div>
+  <div class="sub">{{ mcname }} ｜ 当前连续 {{ streak }} 天 ｜ 最高 {{ max_streak }} 天</div>
+</div>
+
+<div class="fee-info">补签费用：基础 <b>{{ base }}</b> 铜 + 往前每天 <b>+{{ step }}</b> 铜（线性递增）</div>
+
+<div class="list">
+  {% for item in items %}
+  <div class="row">
+    <span class="date">{{ item.date }}</span>
+    <span class="rel">{{ item.rel }}</span>
+    <span class="cost">{{ item.cost }} <small>铜</small></span>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="footer">共 {{ total }} 天可补签 ｜ 发送：补签 日期 ｜ 例：补签 2026-08-10</div>
+
+</body>
+</html>

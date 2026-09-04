@@ -416,6 +416,7 @@ class MyPlugin(Star):
         self.sign_money_command = str(self.config.get("sign_money_command", "d money add {name} {amount}"))
         self.money_command_prefix = str(self.config.get("money_command_prefix", "d money"))
         self.sign_backfill_cost_per_day = int(self.config.get("sign_backfill_cost_per_day", 50))
+        self.sign_backfill_step = int(self.config.get("sign_backfill_step", 50))  # 补签每早一天递增
         self.sign_streak_bonus = int(self.config.get("sign_streak_bonus", 20))  # 连续签到每连续一天加成
         self.sign_cal_font_path = str(self.config.get("sign_cal_font_path", "") or "").strip()
         self.sign_cal_font_cache_dir = os.path.join(self.plugin_data_dir, "fonts")
@@ -831,7 +832,7 @@ class MyPlugin(Star):
         elif reward > 0:
             draw.text((30, y + 8), f"+{reward}", fill="#E65100", font=font_big)
             bw = draw.textbbox((0, 0), f"+{reward}", font=font_big)
-            info_parts = [f"奖池 {pool} / {yesterday_count} 人 = 基础 {base_reward}"]
+            info_parts = [f"奖池 {pool} / {yesterday_count} 人 "]
             if bonus_desc:
                 info_parts.append(f"连续加成 {bonus_desc}")
             draw.text((30 + (bw[2] - bw[0]) + 10, y + 42), "  |  ".join(info_parts), fill="#999999", font=font)
@@ -2371,6 +2372,39 @@ class MyPlugin(Star):
             lines.append(row.rstrip())
         yield event.plain_result("\n".join(lines))
 
+    def _sign_backfill_cost(self, days_back: int) -> int:
+        """补签费用：线性递增。基础 + (往前天数-1)×步进。"""
+        return self.sign_backfill_cost_per_day + max(0, days_back - 1) * self.sign_backfill_step
+
+    def _generate_sign_backfill_list(self, mcname: str, missed: list[str], streak: int, max_streak: int) -> bytes | None:
+        """生成补签列表图片（HTML 模板 → PNG）。"""
+        if _HAS_JINJA2:
+            tpl_html = _load_template("sign_backfill_template.html")
+            if tpl_html:
+                try:
+                    now = datetime.now()
+                    today = now.date()
+                    items = []
+                    for ds in missed:
+                        d = datetime.strptime(ds, "%Y-%m-%d").date()
+                        days_back = (today - d).days
+                        items.append({
+                            "date": ds,
+                            "rel": f"{days_back}天前",
+                            "cost": self._sign_backfill_cost(days_back),
+                        })
+                    html = Template(tpl_html).render(
+                        mcname=mcname, streak=streak, max_streak=max_streak,
+                        base=self.sign_backfill_cost_per_day, step=self.sign_backfill_step,
+                        items=items, total=len(missed),
+                    )
+                    img_bytes = _html_to_png(html, width=420)
+                    if img_bytes:
+                        return img_bytes
+                except Exception as e:
+                    logger.warning(f"[mcsignback] 模板渲染失败: {e}")
+        return None
+
     @filter.command("mcsignback", desc="补签（花铜补往日签到）", alias={"mcsignbackfill", "mcbq"})
     async def mcsignback(self, event: AstrMessageEvent):
         if not self.enable_sign:
@@ -2385,7 +2419,6 @@ class MyPlugin(Star):
         # /mcsignback 2026-06-13  或  /mcsignback 13（最近30天内的某日）
         raw = self._tail_after_command_names(event, "mcsignback", "mcsignbackfill", "mcbq")
         if not raw.strip():
-            cost = self.sign_backfill_cost_per_day
             # 列出最近30天可补签的日期
             now = datetime.now()
             today = now.date()
@@ -2400,16 +2433,28 @@ class MyPlugin(Star):
                 return
             streak = self._sign_consecutive_days(qqid)
             max_streak = self._sign_max_consecutive_days(qqid)
+            # 尝试图片列表
+            img_bytes = self._generate_sign_backfill_list(mcname, missed, streak, max_streak)
+            if img_bytes:
+                try:
+                    import base64
+                    yield event.make_result().base64_image(base64.b64encode(img_bytes).decode())
+                    return
+                except Exception as e:
+                    logger.warning(f"[mcsignback] 发送图片失败: {e}")
+            # 文本兜底
+            base = self.sign_backfill_cost_per_day
+            step = self.sign_backfill_step
             lines = [
                 "═══ 补签 ═══",
-                f"补签费用： 基础费用{cost} × 2^(天数-1) /天",
+                f"补签费用：基础 {base} 铜 + 往前每天 +{step} 铜（线性）",
                 f"当前连续 {streak} 天  |  最高 {max_streak} 天",
                 "",
                 f"可补签日期（{len(missed)} 天，最近30天内）：",
             ]
             for ds in missed:
                 days_back = (today - datetime.strptime(ds, "%Y-%m-%d").date()).days
-                day_cost = cost * (2 ** (days_back - 1))
+                day_cost = self._sign_backfill_cost(days_back)
                 lines.append(f"  {ds}  费用 {day_cost} 铜")
             lines.append("")
             lines.append("用法：/mcsignback 2026-08-10 或 /mcsignback 20（本月的某天）")
@@ -2442,7 +2487,7 @@ class MyPlugin(Star):
             yield event.plain_result(f"{ds} 已经签过到了，不需要补签。")
             return
         days_back = (today - target_date).days
-        cost = self.sign_backfill_cost_per_day * (2 ** (days_back - 1))
+        cost = self._sign_backfill_cost(days_back)
         # 查询余额
         get_cmd = f"{self.money_command_prefix} get {mcname}"
         try:
