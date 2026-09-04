@@ -613,10 +613,10 @@ class MyPlugin(Star):
         return max(calculated, admin_override)
 
     def _sign_streak_bonus_value(self, streak: int) -> tuple[int, str]:
-        """连续签到加成：连续 N 天 = N × sign_streak_bonus，封顶 5000。返回 (加成值, 描述)。"""
+        """连续签到加成：连续 N 天 = N × sign_streak_bonus，封顶 2000。返回 (加成值, 描述)。"""
         if streak <= 0:
             return 0, ""
-        val = min(streak * self.sign_streak_bonus, 5000)
+        val = min(streak * self.sign_streak_bonus, 2000)
         return val, f"+{val}"
 
     @staticmethod
@@ -836,8 +836,8 @@ class MyPlugin(Star):
         else:
             draw.text((30, y + 20), no_reward_reason or "签到成功", fill="#999999", font=font)
         y += 95
-        # 连续加成 = 连续签到 N 天 × sign_streak_bonus（封顶5000）
-        streak_val = min(streak * self.sign_streak_bonus, 5000) if streak > 0 else 0
+        # 连续加成 = 连续签到 N 天 × sign_streak_bonus（封顶2000）
+        streak_val = min(streak * self.sign_streak_bonus, 2000) if streak > 0 else 0
         stats = [
             ("今日签到", f"{today_count} 人"),
             ("累计签到", f"{total_days} 天"),
@@ -2099,7 +2099,7 @@ class MyPlugin(Star):
         max_streak = self._sign_max_consecutive_days(qqid)
         fortune = self._generate_fortune(qqid, today)
         total_days = self._get_total_sign_days(qqid)
-        # 连续加成：连续 N 天 = N × sign_streak_bonus（封顶5000），N 含今天
+        # 连续加成：连续 N 天 = N × sign_streak_bonus（封顶2000），N 含今天
         streak_today = self._sign_consecutive_days(qqid)
         streak_bonus, streak_desc = self._sign_streak_bonus_value(streak_today)
 
@@ -2156,7 +2156,7 @@ class MyPlugin(Star):
                 base_reward = pool // yesterday_count
             else:
                 base_reward = 0
-            # 奖励 = 基础 + 连续天数加成（连续 N 天 × 20，封顶5000）
+            # 奖励 = 基础 + 连续天数加成（连续 N 天 × 20，封顶2000）
             reward = int(base_reward + streak_bonus)
             cmd = self.sign_money_command.replace("{name}", mcname).replace("{amount}", str(reward))
             try:
