@@ -1,5 +1,5 @@
 name: astrbot_plugin_PLGCAT3 # 这是你的插件的唯一识别名。
 desc: MC服务器管理插件：白名单、封禁、聊天转发、签到经济、RCON命令 # 插件简短描述
-version: v1.1.0 # 插件版本号。格式：v1.1.1 或者 v1.1
+version: v1.1.2 # 插件版本号。格式：v1.1.1 或者 v1.1
 author: Dragonrster # 作者
 repo: https://github.com/Dragonrster/astrbot_plugin_PLGCAT3 # 插件的仓库地址

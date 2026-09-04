@@ -77,7 +77,7 @@ body { font-family: "Noto Sans SC", "Microsoft YaHei", "PingFang SC", "WenQuanYi
   <span class="info">
     奖池 {{ pool }} / {{ yesterday_count }} 人 = 基础 {{ base_reward }}
     ｜ 累计加成 +{{ [total_days * 20, 5000]|min }}
-    {% if bonus_desc %} ｜ 连续加成 {{ bonus_desc }}{% endif %}
+    {% if bonus_desc %} ｜ 连续加成 {{ bonus_desc }}{% endif %}（固定加值，非百分比）
   </span>
 </div>
 {% endif %}

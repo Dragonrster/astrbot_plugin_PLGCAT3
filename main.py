@@ -417,6 +417,7 @@ class MyPlugin(Star):
         self.money_command_prefix = str(self.config.get("money_command_prefix", "d money"))
         self.sign_backfill_cost_per_day = int(self.config.get("sign_backfill_cost_per_day", 50))
         self.sign_day_bonus = int(self.config.get("sign_day_bonus", 20))  # 累计签到每天加成
+        self.sign_streak_bonus = int(self.config.get("sign_streak_bonus", 20))  # 连续签到每天加成
         self.sign_cal_font_path = str(self.config.get("sign_cal_font_path", "") or "").strip()
         self.sign_cal_font_cache_dir = os.path.join(self.plugin_data_dir, "fonts")
         self.sign_file = os.path.join(self.plugin_data_dir, "sign_data.json")
@@ -614,15 +615,12 @@ class MyPlugin(Star):
         admin_override = self.sign_admin_data.get(qqid, {}).get("max_streak", 0)
         return max(calculated, admin_override)
 
-    @staticmethod
-    def _sign_bonus_multiplier(streak: int) -> tuple[float, str]:
-        """连续签到加成：每天 +1%，100 天封顶（2.0x）。返回 (倍率, 描述文字)。"""
+    def _sign_streak_bonus_value(self, streak: int) -> tuple[int, str]:
+        """连续签到加成：每连续一天 +sign_streak_bonus（固定加值）。返回 (加成值, 描述)。"""
         if streak <= 1:
-            return 1.0, ""
-        days = min(streak, 100)
-        pct = days - 1  # 第2天开始 +1%
-        mult = 1.0 + pct / 100.0
-        return mult, f"+{pct}%"
+            return 0, ""
+        val = (streak - 1) * self.sign_streak_bonus
+        return val, f"+{val}"
 
     @staticmethod
     def _generate_fortune(qqid: str, date_str: str) -> dict:
@@ -2098,7 +2096,7 @@ class MyPlugin(Star):
         max_streak = self._sign_max_consecutive_days(qqid)
         fortune = self._generate_fortune(qqid, today)
         total_days = self._get_total_sign_days(qqid)
-        bonus_mult, bonus_desc = self._sign_bonus_multiplier(streak)
+        streak_bonus, streak_desc = self._sign_streak_bonus_value(streak)
 
         if qqid in self._get_all_signed_qqids(today):
             # 已签到，尝试图片卡片
@@ -2106,7 +2104,7 @@ class MyPlugin(Star):
                 user_name, mcname, 0, 0, yesterday_count,
                 today_count, streak, max_streak, fortune,
                 no_reward_reason="✅ 今日已签到",
-                bonus_desc=bonus_desc, total_days=total_days,
+                bonus_desc=streak_desc, total_days=total_days,
             )
             if already_img:
                 try:
@@ -2117,7 +2115,7 @@ class MyPlugin(Star):
                     logger.warning(f"[mcsign] 发送已签到卡片失败: {e}")
             lines = [
                 "✅ 今日已签到",
-                f"累计 {total_days} 天  |  连续 {streak} 天  |  最高 {max_streak} 天  |  加成 {bonus_desc or '无'}",
+                f"累计 {total_days} 天  |  连续 {streak} 天  |  最高 {max_streak} 天  |  连续加成 {streak_desc or '无'}",
                 f"今日占卜：{fortune['level']}  幸运色 {fortune['color']}  幸运数字 {fortune['number']}",
                 f"签文：{fortune['message']}",
             ]
@@ -2152,7 +2150,7 @@ class MyPlugin(Star):
             else:
                 base_reward = 0
             day_bonus = min(total_days * self.sign_day_bonus, 5000)  # 每累计签到一天 +20，封顶5000
-            reward = int((base_reward + day_bonus) * bonus_mult)
+            reward = int(base_reward + day_bonus + streak_bonus)
             cmd = self.sign_money_command.replace("{name}", mcname).replace("{amount}", str(reward))
             try:
                 await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, cmd)
@@ -2164,7 +2162,7 @@ class MyPlugin(Star):
         card_img = self._generate_sign_card(
             user_name, mcname, reward, pool, yesterday_count,
             today_count, streak, max_streak, fortune, no_reward_reason,
-            base_reward, bonus_desc, total_days,
+            base_reward, streak_desc, total_days,
         )
         if card_img:
             try:
@@ -2184,8 +2182,8 @@ class MyPlugin(Star):
                 parts_info.append(f"基础 {base_reward}")
             if day_bonus > 0:
                 parts_info.append(f"累计加成 +{day_bonus}")
-            if bonus_desc:
-                parts_info.append(f"连续加成 {bonus_desc}")
+            if streak_bonus > 0:
+                parts_info.append(f"连续加成 +{streak_bonus}")
             lines[0] = f"签到成功！{mcname} +{reward} 铜（{'  '.join(parts_info)}）"
         lines.append(f"今日 {today_count} 人  |  累计 {total_days} 天  |  连续 {streak} 天  |  最高 {max_streak} 天")
         lines.append(f"今日占卜：{fortune['level']}  幸运色 {fortune['color']}  幸运数字 {fortune['number']}")
