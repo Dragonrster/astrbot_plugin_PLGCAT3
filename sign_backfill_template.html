@@ -13,6 +13,9 @@ body { font-family: "Noto Sans SC", "Microsoft YaHei", "PingFang SC", "WenQuanYi
 .fee-info { font-size: 12px; color: #e65100; margin: 8px 2px; }
 .fee-info b { font-size: 13px; }
 
+.card-info { font-size: 12px; color: #2e7d32; background: #e8f5e9; border-left: 3px solid #43a047; border-radius: 4px; padding: 6px 10px; margin: 0 0 6px; }
+.card-info b { font-size: 13px; }
+
 .list { margin-top: 4px; }
 .row { display: flex; align-items: center; padding: 7px 10px; border-bottom: 1px solid #f5f5f5; }
 .row:nth-child(odd) { background: #fafafa; }
@@ -27,11 +30,15 @@ body { font-family: "Noto Sans SC", "Microsoft YaHei", "PingFang SC", "WenQuanYi
 <body>
 
 <div class="header">
-  <div class="title">📋 补签列表</div>
+  <div class="title">补签列表</div>
   <div class="sub">{{ mcname }} ｜ 当前连续 {{ streak }} 天 ｜ 最高 {{ max_streak }} 天</div>
 </div>
 
 <div class="fee-info">补签费用：基础 <b>{{ base }}</b> 铜 + 往前每天 <b>+{{ step }}</b> 铜（线性递增）</div>
+
+{% if cards %}
+<div class="card-info">补签卡 <b>{{ cards }}</b> 张：{% if auto_use %}补签自动免铜（想花铜可加「铜」）{% else %}补签时加「卡」免铜（不加则照常扣铜）{% endif %}</div>
+{% endif %}
 
 <div class="list">
   {% for item in items %}
@@ -43,7 +50,7 @@ body { font-family: "Noto Sans SC", "Microsoft YaHei", "PingFang SC", "WenQuanYi
   {% endfor %}
 </div>
 
-<div class="footer">共 {{ total }} 天可补签 ｜ 发送：补签 日期 ｜ 例：补签 2026-08-10</div>
+<div class="footer">共 {{ total }} 天可补签 ｜ 发送：/mcsignback 日期 [卡] ｜ 例：/mcsignback 2026-08-10 卡</div>
 
 </body>
 </html>

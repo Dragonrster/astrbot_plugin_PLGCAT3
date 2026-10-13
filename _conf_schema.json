@@ -154,6 +154,12 @@
     "default": "d money",
     "hint": "查询拼接为: {prefix} get {name}"
   },
+  "honor_command_prefix": {
+    "description": "功勋命令前缀",
+    "type": "string",
+    "default": "dbc honor",
+    "hint": "查询拼接为: {prefix} get {name}，例如: dbc honor get Steve"
+  },
   "sign_backfill_cost_per_day": {
     "description": "补签基础费用（铜钱）",
     "type": "int",
@@ -166,9 +172,21 @@
     "hint": "线性递增：第N天前 = 基础 + (N-1)×步进"
   },
   "sign_streak_bonus": {
-    "description": "签到连续天数加成（连续N天 = N × 该值，封顶5000）",
+    "description": "签到连续天数加成（连续N天 = N × 该值，封顶2000）",
     "type": "int",
     "default": 20
+  },
+  "sign_card_auto_use": {
+    "description": "补签时自动使用补签卡（持有补签卡则免铜）",
+    "type": "bool",
+    "default": true,
+    "hint": "关闭后需显式发送 /mcsignback <日期> 卡 才会用卡；加「铜」可强制花铜"
+  },
+  "sign_card_max": {
+    "description": "单个玩家可持有的补签卡上限",
+    "type": "int",
+    "default": 99,
+    "hint": "最小 1；管理员 /mccard give|giveall 不得超过该上限"
   },
   "mc_stats_world_path": {
     "description": "服务器 world 目录路径",

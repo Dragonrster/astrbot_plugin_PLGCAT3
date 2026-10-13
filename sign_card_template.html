@@ -59,13 +59,13 @@ body { font-family: "Noto Sans SC", "Microsoft YaHei", "PingFang SC", "WenQuanYi
 <div class="user-info">
   <div class="name">
     {{ user_name }}
-    {% if is_already_signed %}<span class="badge badge-signed">✅ 已签到</span>{% endif %}
+    {% if is_already_signed %}<span class="badge badge-signed">已签到</span>{% endif %}
   </div>
   {% if mc_name %}<div class="mc">MC：{{ mc_name }}</div>{% endif %}
 </div>
 
 {% if is_already_signed %}
-<div class="signed-banner">✅ 今日已签到</div>
+<div class="signed-banner">今日已签到</div>
 {% elif no_reward_reason %}
 <div class="reward-box">
   <div class="no-reward">{{ no_reward_reason }}</div>
@@ -105,7 +105,7 @@ body { font-family: "Noto Sans SC", "Microsoft YaHei", "PingFang SC", "WenQuanYi
 </div>
 
 <div class="fortune-box">
-  <div class="fortune-title">🔮 今日占卜</div>
+  <div class="fortune-title">今日占卜</div>
   <span class="fortune-level level-{{ fortune.level }}">{{ fortune.level }}</span>
   <span class="fortune-meta">幸运色 {{ fortune.color }} ｜ 幸运数字 {{ fortune.number }}</span>
   <div class="fortune-msg">「{{ fortune.message }}」</div>

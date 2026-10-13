@@ -12,7 +12,7 @@
 | 封禁/踢人  | ban、pardon、kick、tempban                                        |
 | 服务器信息 | 在线玩家（Server List Ping）、插件列表、TPS、Spark 健康、实体列表 |
 | MC↔QQ 聊天 | 游戏内 `.mcsay` 转发到 QQ，支持文件模式和 MCSM 面板模式           |
-| 签到经济   | 每日签到领铜钱、查余额、玩家间转账                                |
+| 签到经济   | 每日签到领铜钱、查余额、查功勋、玩家间转账、铜钱/补签卡补签        |
 | RCON 透传  | `/mcrun` 执行任意控制台命令（带安全拦截）                         |
 
 ## 安装
@@ -58,13 +58,19 @@
 
 ### 签到经济
 
-| 配置项                              | 说明                                                | 默认值                        |
-| ----------------------------------- | --------------------------------------------------- | ----------------------------- |
-| `enable_sign`                       | 启用签到功能                                        | `false`                       |
-| `sign_money_min` / `sign_money_max` | 签到随机铜钱范围                                    | `10` / `100`                  |
-| `sign_money_command`                | 加钱 RCON 命令模板（`{name}`、`{amount}` 会被替换） | `d money add {name} {amount}` |
-| `money_command_prefix`              | 余额查询命令前缀                                    | `d money`                     |
-| `sign_backfill_cost_per_day`        | 补签基础费用（越早越贵：第N天前 = 基础 × 2^(N-1)）  | `50`                          |
+| 配置项                              | 说明                                                                  | 默认值                        |
+| ----------------------------------- | --------------------------------------------------------------------- | ----------------------------- |
+| `enable_sign`                       | 启用签到功能                                                          | `false`                       |
+| `sign_money_min` / `sign_money_max` | 签到随机铜钱范围                                                      | `10` / `100`                  |
+| `sign_money_command`                | 加钱 RCON 命令模板（`{name}`、`{amount}` 会被替换）                   | `d money add {name} {amount}` |
+| `money_command_prefix`              | 余额查询命令前缀                                                      | `d money`                     |
+| `honor_command_prefix`              | 功勋查询命令前缀                                                      | `dbc honor`                   |
+| `sign_backfill_cost_per_day`        | 补签基础费用                                                          | `50`                          |
+| `sign_backfill_step`                | 补签每往前一天递增的费用（第N天前 = 基础 + (N-1)×步进）               | `100`                         |
+| `sign_streak_bonus`                 | 连续签到加成（连续N天 = N×该值，封顶 2000）                           | `20`                          |
+| `sign_card_auto_use`                | 持有补签卡时补签自动免铜（关闭后需显式发送 `卡`）                     | `true`                        |
+| `sign_card_max`                     | 单个玩家可持有的补签卡上限                                            | `99`                          |
+| `sign_cal_font_path`                | 签到日历自定义字体路径（留空自动检测）                                | —                             |
 
 ## 命令列表
 
@@ -110,13 +116,28 @@
 
 ### 经济
 
-| 命令                          | 说明                               |
-| ----------------------------- | ---------------------------------- |
-| `/mcsign`                     | 每日签到领铜钱（mcqd）             |
-| `/mcsigncal`                  | 查看签到日历图片（mcsigncalendar） |
-| `/mcsignback [日期]`          | 补签，花铜钱补往日签到（mcbq）     |
-| `/mcmoney`                    | 查询铜钱余额（mcqian）             |
-| `/mctransfer <游戏ID> <数量>` | 转账（mczz）                       |
+| 命令                                  | 说明                                                             |
+| ------------------------------------- | ---------------------------------------------------------------- |
+| `/mcsign`                             | 每日签到领铜钱（mcqd）                                           |
+| `/mcsigncal`                          | 查看签到日历图片（mcsigncalendar）                               |
+| `/mcsignback [日期] [卡\|铜]`         | 补签：默认花铜，持卡自动免铜（mcbq）                             |
+| `/mccard`                             | 查看自己持有的补签卡（mcsigncard、补签卡、bqk）                  |
+| `[管] /mccard give <QQ\|@某人> <数量>`| 发放补签卡                                                       |
+| `[管] /mccard giveall <数量>`         | 一键发放给所有已绑定 MC 账号的人                                 |
+| `[管] /mccard take <QQ\|@某人> <数量\|all>` | 回收补签卡                                                 |
+| `[管] /mccard list`                   | 补签卡持有人列表                                                 |
+| `/mcmoney`                            | 查询铜钱余额（mcqian）                                           |
+| `/mchonor [游戏ID\|@某人]`            | 查询功勋（功勋、honor；指定 MC 名查他人需管理员）                |
+| `/mctransfer <游戏ID> <数量>`         | 转账（mczz）                                                     |
+
+**功勋查询**：`/mchonor`（或 `/功勋`）会查询你自己已绑定 MC 账号的功勋；管理员可用 `/mchonor <游戏ID>` 或 `/mchonor @某人` 查他人。实际执行的服务端命令为 `<honor_command_prefix> get <游戏ID>`（默认 `dbc honor get <游戏ID>`），并把服务端返回的功勋文本原样展示。
+
+**补签卡**：由管理员发放，玩家补签时免铜（不扣铜钱）。
+
+- `/mcsignback 卡` — 用补签卡补最近漏签的一天
+- `/mcsignback 2026-08-10 卡` — 用补签卡补指定日期
+- `/mcsignback 2026-08-10 铜` — 不用卡，改花铜钱补签（或 `sign_card_auto_use` 关闭后显式加 `卡` 才用卡）
+- 补签卡不改变 30 天补签窗口，也不能补已经签到的日期；用卡失败不消耗卡片
 
 ### 其他
 
@@ -133,6 +154,13 @@
 
 - `apply_whitelist.json` — QQ→MC 账号绑定记录
 - `sign_data.json` — 签到记录
+- `sign_admin.json` — 签到数据管理员覆盖
+- `sign_cards.json` — 玩家持有的补签卡数量
+- `sign_card_log.jsonl` — 补签卡发放/回收/使用审计日志（`give` / `giveall` / `take` / `use` / `refund`）
+
+> `sign_cards.json` 采用「先写临时文件再原子替换」，读不出来时会先改名备份成
+> `sign_cards.json.bad-<时间戳>` 再按空库存启动，不会直接覆盖玩家已有的卡；
+> 需要人工恢复时对照 `sign_card_log.jsonl` 即可。
 - `transfer_log.jsonl` — 转账审计日志
 - `mc_chat_qq_target.json` — 聊天转发目标
 

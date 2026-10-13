@@ -101,6 +101,37 @@ def strip_mc_color(text: str) -> str:
     return re.sub(r"§.", "", text)
 
 
+_RCON_LOG_PREFIX_RE = re.compile(
+    r"^\s*(?:\[\s*\d{1,2}:\d{2}:\d{2}(?:[.,]\d+)?\s*\]|\d{1,2}:\d{2}:\d{2}(?:[.,]\d+)?)?\s*"
+    r"(?:\[[^\]\n]{0,60}(?:INFO|WARN|ERROR|DEBUG|TRACE|FATAL|Server thread|Async|main)[^\]\n]{0,60}\]\s*:?\s*)*"
+)
+
+
+def _strip_rcon_log_prefix(text: str) -> str:
+    """去掉 RCON 响应可能带上的服务端日志前缀。
+
+    例如 "22:18:39 [Server thread/INFO]: 11ya 的功勋：2086" -> "11ya 的功勋：2086"
+    只清理「时间戳 + 日志级别标签」，普通方括号内容（如 "[功勋] xxx"）保持原样。
+    """
+    return _RCON_LOG_PREFIX_RE.sub("", text or "").strip()
+
+
+def _as_bool(value, default: bool = False) -> bool:
+    """配置项转 bool，兼容 "true"/"false"/"0"/"1" 等字符串写法。"""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in ("1", "true", "yes", "on", "是", "开"):
+            return True
+        if v in ("0", "false", "no", "off", "否", "关"):
+            return False
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return default
+
+
 def mc_offline_uuid(name: str) -> str:
     """计算离线模式玩家 UUID（OfflinePlayer:{name} 的 MD5 v3 UUID）。"""
     import hashlib
@@ -386,7 +417,7 @@ async def rcon_command(
 
 
 @register(
-    "PLG_CAT3", "Dragonrster", "MC服务器管理插件：白名单、封禁、聊天转发、签到经济、RCON命令", "1.1.6"
+    "PLG_CAT3", "Dragonrster", "MC服务器管理插件：白名单、封禁、聊天转发、签到经济、RCON命令", "1.1.8"
 )
 class MyPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -412,6 +443,7 @@ class MyPlugin(Star):
         self.sign_money_max = int(self.config.get("sign_money_max", 100))
         self.sign_money_command = str(self.config.get("sign_money_command", "d money add {name} {amount}"))
         self.money_command_prefix = str(self.config.get("money_command_prefix", "d money"))
+        self.honor_command_prefix = str(self.config.get("honor_command_prefix", "dbc honor")).strip() or "dbc honor"
         self.sign_backfill_cost_per_day = int(self.config.get("sign_backfill_cost_per_day", 50))
         self.sign_backfill_step = int(self.config.get("sign_backfill_step", 100))  # 补签每早一天递增
         self.sign_streak_bonus = int(self.config.get("sign_streak_bonus", 20))  # 连续签到每连续一天加成
@@ -421,6 +453,15 @@ class MyPlugin(Star):
         self.sign_data = self._load_sign_data()
         self.sign_admin_file = os.path.join(self.plugin_data_dir, "sign_admin.json")
         self.sign_admin_data = self._load_sign_admin_data()
+        # 补签卡：仅管理员发放，玩家补签时免铜
+        self.sign_card_file = os.path.join(self.plugin_data_dir, "sign_cards.json")
+        self.sign_cards = self._load_sign_cards()
+        self.sign_card_log_file = os.path.join(self.plugin_data_dir, "sign_card_log.jsonl")
+        self.sign_card_auto_use = _as_bool(self.config.get("sign_card_auto_use", True), True)
+        try:
+            self.sign_card_max = max(1, int(self.config.get("sign_card_max", 99)))
+        except (TypeError, ValueError):
+            self.sign_card_max = 99
         self.transfer_log_file = os.path.join(self.plugin_data_dir, "transfer_log.jsonl")
         self.red_packet_file = os.path.join(self.plugin_data_dir, "red_packets.json")
         self.red_packets = self._load_red_packets()
@@ -556,6 +597,151 @@ class MyPlugin(Star):
     def _save_sign_admin_data(self):
         with open(self.sign_admin_file, "w", encoding="utf-8") as f:
             json.dump(self.sign_admin_data, f, ensure_ascii=False, indent=2)
+
+    # ── 补签卡 ─────────────────────────────────────────────
+    def _load_sign_cards(self) -> dict[str, int]:
+        """加载补签卡库存。格式: {qqid: 数量}；文件损坏时先隔离备份，再按空库存启动。"""
+        if not os.path.isfile(self.sign_card_file):
+            return {}
+        try:
+            with open(self.sign_card_file, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+        except Exception as e:
+            logger.error(f"读取 sign_cards.json 失败: {e}")
+            self._quarantine_sign_cards("解析失败")
+            return {}
+        if not isinstance(raw, dict):
+            logger.error(f"sign_cards.json 结构异常（{type(raw).__name__}）")
+            self._quarantine_sign_cards("结构异常")
+            return {}
+        cards: dict[str, int] = {}
+        for qqid, count in raw.items():
+            try:
+                n = int(count)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if n > 0:
+                cards[str(qqid)] = n
+        return cards
+
+    def _quarantine_sign_cards(self, reason: str):
+        """把读不出来的库存文件改名保留（.bad-时间戳），
+
+        避免之后任何一次保存把玩家持有的卡直接覆盖掉（审计日志只能手工回放，太麻烦）。
+        """
+        try:
+            backup = f"{self.sign_card_file}.bad-{time.strftime('%Y%m%d-%H%M%S')}"
+            os.replace(self.sign_card_file, backup)
+            logger.error(f"[mccard] sign_cards.json {reason}，原文件已备份为 {backup}，本次按空库存继续")
+        except Exception as e:
+            logger.error(f"[mccard] 隔离损坏的 sign_cards.json 失败: {e}")
+
+    def _save_sign_cards(self):
+        # 顺手清理 0 张/负数的残留条目，避免文件里堆垃圾
+        self.sign_cards = {
+            str(q): int(n) for q, n in self.sign_cards.items() if int(n) > 0
+        }
+        os.makedirs(str(self.plugin_data_dir), exist_ok=True)
+        # 先写临时文件再原子替换：写一半掉线也不会留下坏文件
+        tmp = f"{self.sign_card_file}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(self.sign_cards, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, self.sign_card_file)
+
+    def _get_sign_cards(self, qqid: str) -> int:
+        """查询某 QQ 持有的补签卡数量。"""
+        try:
+            return max(0, int(self.sign_cards.get(str(qqid), 0)))
+        except (TypeError, ValueError):
+            return 0
+
+    def _add_sign_cards(self, qqid: str, count: int) -> tuple[int, int]:
+        """发放补签卡（受 sign_card_max 上限限制），返回 (实际发出, 发放后持有)。"""
+        qqid = str(qqid)
+        old = self._get_sign_cards(qqid)
+        added = max(0, min(int(count), self.sign_card_max - old))
+        new = old + added
+        if added:
+            self.sign_cards[qqid] = new
+        return added, new
+
+    def _take_sign_cards(self, qqid: str, count: int | None = None) -> tuple[int, int]:
+        """回收补签卡，count=None 表示全部回收，返回 (实际回收, 回收后持有)。"""
+        qqid = str(qqid)
+        old = self._get_sign_cards(qqid)
+        removed = old if count is None else max(0, min(int(count), old))
+        left = old - removed
+        if left > 0:
+            self.sign_cards[qqid] = left
+        else:
+            self.sign_cards.pop(qqid, None)
+        return removed, left
+
+    def _use_sign_card(self, qqid: str) -> bool:
+        """消耗一张补签卡，成功返回 True（库存不足返回 False，不扣任何东西）。"""
+        qqid = str(qqid)
+        old = self._get_sign_cards(qqid)
+        if old <= 0:
+            return False
+        if old - 1 > 0:
+            self.sign_cards[qqid] = old - 1
+        else:
+            self.sign_cards.pop(qqid, None)
+        return True
+
+    def _log_sign_card(self, action: str, qqid: str, count: int, by: str = ""):
+        """补签卡审计日志（jsonl），写失败不影响主流程。"""
+        try:
+            os.makedirs(str(self.plugin_data_dir), exist_ok=True)
+            with open(self.sign_card_log_file, "a", encoding="utf-8") as f:
+                f.write(
+                    json.dumps(
+                        {
+                            "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "action": action,  # give / giveall / take / use
+                            "qq": str(qqid),
+                            "count": int(count),
+                            "by": str(by),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        except Exception as e:
+            logger.warning(f"[mccard] 写审计日志失败: {e}")
+
+    def _bound_qqids(self) -> list[str]:
+        """所有已绑定 MC 账号的 QQ（一键发放的目标人群）。"""
+        return sorted(
+            str(qqid)
+            for qqid, names in self.apply_data.items()
+            if (isinstance(names, list) and names) or (isinstance(names, str) and names)
+        )
+
+    def _resolve_card_target(self, token: str, event: AstrMessageEvent) -> str:
+        """把 give/take/info 的目标解析成 QQ：纯数字 / 昵称(QQ) / @某人。
+
+        显式写出的 QQ 号优先于消息里的 @ 段——否则「给 Bob(12345) 发卡」会被
+        同一条消息里的另一个 @ 顶掉，发到无关玩家头上。
+        """
+        t = (token or "").strip().lstrip("@")
+        if not t:
+            return ""
+        m = re.search(r"(\d{5,11})", t)
+        if m:
+            return m.group(1)
+        qq = self._resolve_at_qq(t, event)
+        qq = str(qq or "").strip()
+        return qq if re.fullmatch(r"\d{5,11}", qq) else ""
+
+    @staticmethod
+    def _parse_card_count(token: str) -> int | None:
+        """解析发放/回收数量，只接受 1~10000 的十进制整数。"""
+        t = str(token).strip()
+        if not re.fullmatch(r"\d{1,5}", t):
+            return None
+        n = int(t)
+        return n if 1 <= n <= 10000 else None
 
     def _get_total_sign_days(self, qqid: str) -> int:
         """获取累计签到天数（实际记录 + 管理员覆盖）"""
@@ -944,8 +1130,7 @@ class MyPlugin(Star):
                 day_str = str(day)
                 bbox = draw.textbbox((0, 0), day_str, font=font_day)
                 draw.text((x + cell_w // 2 - (bbox[2] - bbox[0]) // 2, y + 8), day_str, fill=text_fill, font=font_day)
-                if day in signed_days:
-                    draw.text((x + cell_w // 2 - 5, y + cell_h - 18), "✓", fill="#4CAF50", font=font)
+                # 已签到格用绿色底色 + 绿色边框/数字区分，不再叠加对勾符号
         ly = grid_top + rows * cell_h + 6
         for i, (label, bg, border) in enumerate([("已签到", "#E8F5E9", "#4CAF50"), ("今日", "#FFF8E1", "#FF9800"), ("未签到", "#F8F9FA", "#E0E0E0")]):
             bx = pad_x + i * 80
@@ -1763,8 +1948,14 @@ class MyPlugin(Star):
                 "【签到经济】",
                 f"  /mcsign  每日签到+占卜（/签到，/mcqd，/jrrp）{sign}",
                 "  /mcsigncal  签到日历（/mcqc）",
-                "  /mcsignback [日期]  补签（/mcbq）",
+                "  /mcsignback [日期] [卡|铜]  补签（/mcbq）",
+                "  /mccard  补签卡：查看自己持有（/补签卡，/bqk）",
+                "  [管] /mccard give <QQ|@某人> <数量>  发放补签卡",
+                "  [管] /mccard giveall <数量>  一键发放给所有已绑定账号的人",
+                "  [管] /mccard take <QQ|@某人> <数量|all>  回收补签卡",
+                "  [管] /mccard list  查看持有人排行（/mccard help 看全部用法）",
                 "  /mcmoney  查询铜库存（/库存，/mcq）",
+                "  /mchonor  查询功勋（/功勋）",
                 "  /mctransfer <游戏ID> <数量>  投喂转账（/投喂，/mctrans，/mczz）",
                 "  [管] /mcsignreset  重置签到记录（/mcsignr）",
                 "  [管] /mcsignadmin  签到数据管理（/msa）",
@@ -2108,7 +2299,7 @@ class MyPlugin(Star):
             already_img = await self._generate_sign_card(
                 user_name, mcname, 0, 0, yesterday_count,
                 today_count, streak, max_streak, fortune,
-                no_reward_reason="✅ 今日已签到",
+                no_reward_reason="今日已签到",
                 bonus_desc=streak_desc, total_days=total_days,
             )
             if already_img:
@@ -2119,7 +2310,7 @@ class MyPlugin(Star):
                 except Exception as e:
                     logger.warning(f"[mcsign] 发送已签到卡片失败: {e}")
             lines = [
-                "✅ 今日已签到",
+                "今日已签到",
                 f"累计 {total_days} 天  |  连续 {streak} 天  |  最高 {max_streak} 天  |  连续加成 {streak_desc or '无'}",
                 f"今日占卜：{fortune['level']}  幸运色 {fortune['color']}  幸运数字 {fortune['number']}",
                 f"签文：{fortune['message']}",
@@ -2311,6 +2502,206 @@ class MyPlugin(Star):
         else:
             yield event.plain_result(f"未知操作：{action}，支持 backfill / total / maxstreak / info")
 
+    def _mccard_help_text(self) -> str:
+        return "\n".join(
+            [
+                "═══ 补签卡 ═══",
+                "补签卡由管理员发放，补签时免铜。",
+                "",
+                "玩家：",
+                "  /mccard  查看自己持有的补签卡",
+                "  /mcsignback 卡  用补签卡补最近漏签的一天",
+                "  /mcsignback <日期> 卡  用补签卡补指定日期",
+                "  /mcsignback <日期> 铜  不用卡，改花铜补签",
+                "",
+                "管理员：",
+                "  /mccard give <QQ|@某人> <数量>  发放给指定人",
+                "  /mccard giveall <数量>  一键发放给所有已绑定账号的人",
+                "  /mccard take <QQ|@某人> <数量|all>  回收",
+                "  /mccard info [QQ|@某人]  查询持有量",
+                "  /mccard list  持有人列表",
+                f"  单人上限 {self.sign_card_max} 张（配置 sign_card_max）",
+            ]
+        )
+
+    @filter.command("mccard", desc="补签卡（管理员发放，补签免铜）", alias={"mcsigncard", "补签卡", "bqk"})
+    async def mccard(self, event: AstrMessageEvent):
+        qqid = str(event.get_sender_id())
+        admin = self.is_admin(qqid)
+        raw = self._tail_after_command_names(event, "mccard", "mcsigncard", "补签卡", "bqk")
+        parts = raw.split()
+        action = parts[0].lower() if parts else ""
+        args = parts[1:]
+
+        def usage_hint() -> str:
+            if admin:
+                return self._mccard_help_text()
+            return "\n".join(
+                [
+                    "═══ 补签卡 ═══",
+                    "补签卡由管理员发放，补签时免铜。",
+                    f"你当前持有 {self._get_sign_cards(qqid)} 张。",
+                    "/mcsignback 卡  用补签卡补最近漏签的一天",
+                    "/mcsignback <日期> 卡  用补签卡补指定日期",
+                ]
+            )
+
+        # 查询：默认查自己；管理员可查他人
+        if action in ("", "info", "查看", "我的", "my"):
+            target = qqid
+            if args:
+                if not admin:
+                    yield event.plain_result("只有管理员可以查看他人的补签卡。")
+                    return
+                target = self._resolve_card_target(args[0], event)
+                if not target:
+                    yield event.plain_result("无法识别目标，请用 @某人 或直接写 QQ 号。")
+                    return
+            count = self._get_sign_cards(target)
+            if target == qqid:
+                head = f"你持有 {count} 张补签卡。"
+            else:
+                names = self.apply_data.get(target) or []
+                if isinstance(names, str):
+                    names = [names] if names else []
+                head = f"QQ {target} 持有 {count} 张补签卡。" + (
+                    f"（已绑定：{'、'.join(names)}）" if names else "（未绑定 MC 账号）"
+                )
+            lines = [head]
+            if count > 0:
+                lines.append("补签时用：/mcsignback 卡 或 /mcsignback <日期> 卡（免铜）")
+            else:
+                lines.append("补签卡由管理员发放。没有卡时可花铜补签：/mcsignback <日期>")
+            yield event.plain_result("\n".join(lines))
+            return
+
+        if action in ("help", "帮助", "?", "？"):
+            yield event.plain_result(usage_hint())
+            return
+
+        if action in ("give", "发放", "发", "给"):
+            if not admin:
+                yield event.plain_result("抱歉，你没有权限执行此操作。")
+                return
+            if len(args) < 2:
+                yield event.plain_result("用法：/mccard give <QQ|@某人> <数量>")
+                return
+            target = self._resolve_card_target(args[0], event)
+            count = self._parse_card_count(args[1])
+            if not target:
+                yield event.plain_result("无法识别目标，请用 @某人 或直接写 QQ 号。")
+                return
+            if count is None:
+                yield event.plain_result("数量必须是 1~10000 的整数。")
+                return
+            added, held = self._add_sign_cards(target, count)
+            self._save_sign_cards()
+            if added <= 0:
+                yield event.plain_result(
+                    f"QQ {target} 已持有 {held} 张补签卡，达到上限 {self.sign_card_max} 张，本次未发放。"
+                )
+                return
+            self._log_sign_card("give", target, added, qqid)
+            lines = [f"已发放 {added} 张补签卡给 QQ {target}（现持有 {held} 张）。"]
+            if added < count:
+                lines.append(f"数量达到上限 {self.sign_card_max} 张，本次少发 {count - added} 张。")
+            if not self.apply_data.get(target):
+                lines.append("提示：该 QQ 还没有绑定 MC 账号，玩家需先 /wantwl 绑定后才能补签。")
+            yield event.plain_result("\n".join(lines))
+            return
+
+        if action in ("giveall", "all", "一键发放", "全体", "全部发放"):
+            if not admin:
+                yield event.plain_result("抱歉，你没有权限执行此操作。")
+                return
+            if not args:
+                yield event.plain_result("用法：/mccard giveall <数量>\n例：/mccard giveall 1（给所有已绑定账号的人各发 1 张）")
+                return
+            count = self._parse_card_count(args[0])
+            if count is None:
+                yield event.plain_result("数量必须是 1~10000 的整数。")
+                return
+            targets = self._bound_qqids()
+            if not targets:
+                yield event.plain_result("当前没有任何已绑定 MC 账号的玩家，无法一键发放。")
+                return
+            total = 0
+            capped = 0
+            granted: list[tuple[str, int]] = []
+            for t in targets:
+                added, _held = self._add_sign_cards(t, count)
+                total += added
+                if added > 0:
+                    granted.append((t, added))
+                if added < count:
+                    capped += 1
+            # 先落盘再记账：中途写失败时日志里不会出现「发了但没保存」的记录
+            self._save_sign_cards()
+            for t, added in granted:
+                self._log_sign_card("giveall", t, added, qqid)
+            lines = [
+                f"一键发放完成：{len(targets)} 个已绑定账号的 QQ，共发出 {total} 张补签卡。"
+            ]
+            if capped:
+                lines.append(f"其中 {capped} 人受上限 {self.sign_card_max} 张限制，未足额发放。")
+            lines.append("玩家补签免铜：/mcsignback 卡 或 /mcsignback <日期> 卡")
+            yield event.plain_result("\n".join(lines))
+            return
+
+        if action in ("take", "revoke", "回收", "扣"):
+            if not admin:
+                yield event.plain_result("抱歉，你没有权限执行此操作。")
+                return
+            if not args:
+                yield event.plain_result("用法：/mccard take <QQ|@某人> <数量|all>")
+                return
+            target = self._resolve_card_target(args[0], event)
+            if not target:
+                yield event.plain_result("无法识别目标，请用 @某人 或直接写 QQ 号。")
+                return
+            if len(args) >= 2 and args[1].lower() in ("all", "全部"):
+                removed, left = self._take_sign_cards(target, None)
+            elif len(args) >= 2:
+                count = self._parse_card_count(args[1])
+                if count is None:
+                    yield event.plain_result("数量必须是 1~10000 的整数，或用 all 全部回收。")
+                    return
+                removed, left = self._take_sign_cards(target, count)
+            else:
+                yield event.plain_result("用法：/mccard take <QQ|@某人> <数量|all>")
+                return
+            self._save_sign_cards()
+            if removed <= 0:
+                yield event.plain_result(f"QQ {target} 没有补签卡可回收。")
+                return
+            self._log_sign_card("take", target, removed, qqid)
+            yield event.plain_result(f"已回收 QQ {target} 的 {removed} 张补签卡（剩余 {left} 张）。")
+            return
+
+        if action in ("list", "列表", "持有人"):
+            if not admin:
+                yield event.plain_result("抱歉，你没有权限执行此操作。")
+                return
+            holders = sorted(self.sign_cards.items(), key=lambda kv: (-kv[1], kv[0]))
+            holders = [(q, n) for q, n in holders if n > 0]
+            if not holders:
+                yield event.plain_result("当前没有任何玩家持有补签卡。")
+                return
+            total = sum(n for _, n in holders)
+            lines = [f"补签卡持有人（{len(holders)} 人，共 {total} 张）："]
+            for q, n in holders[:50]:
+                names = self.apply_data.get(q) or []
+                if isinstance(names, str):
+                    names = [names] if names else []
+                tag = f"  {'、'.join(names)}" if names else "  (未绑定)"
+                lines.append(f"  {q}  {n} 张{tag}")
+            if len(holders) > 50:
+                lines.append(f"  …仅显示前 50 人，共 {len(holders)} 人。")
+            yield event.plain_result("\n".join(lines))
+            return
+
+        yield event.plain_result(f"未知操作：{action}\n\n{usage_hint()}")
+
     @filter.command("mcsigncal", desc="查看签到日历", alias={"mcsigncalendar", "mcqc"})
     async def mcsigncal(self, event: AstrMessageEvent):
         if not self.enable_sign:
@@ -2354,13 +2745,13 @@ class MyPlugin(Star):
                 signed.append(d)
         streak = self._sign_consecutive_days(qqid)
         max_streak = self._sign_max_consecutive_days(qqid)
-        lines = [f"📅 {y} 年 {m} 月签到日历（{user_name}）", f"签到 {len(signed)}/{total} 天  |  连续 {streak} 天  |  最高 {max_streak} 天", ""]
+        lines = [f"{y} 年 {m} 月签到日历（{user_name}）", f"签到 {len(signed)}/{total} 天  |  连续 {streak} 天  |  最高 {max_streak} 天", ""]
         week = "日 一 二 三 四 五 六"
         lines.append(week)
         first_weekday, _ = calendar.monthrange(y, m)
         row = "   " * first_weekday
         for d in range(1, total + 1):
-            tag = f"{'✅' if d in signed else d:2}"
+            tag = "签" if d in signed else f"{d:2}"
             row += f"{tag} "
             if (first_weekday + d) % 7 == 0:
                 lines.append(row.rstrip())
@@ -2373,7 +2764,7 @@ class MyPlugin(Star):
         """补签费用：线性递增。基础 + (往前天数-1)×步进。"""
         return self.sign_backfill_cost_per_day + max(0, days_back - 1) * self.sign_backfill_step
 
-    async def _generate_sign_backfill_list(self, mcname: str, missed: list[str], streak: int, max_streak: int) -> bytes | None:
+    async def _generate_sign_backfill_list(self, mcname: str, missed: list[str], streak: int, max_streak: int, cards: int = 0) -> bytes | None:
         """生成补签列表图片（优先 HTML 模板，兜底 PIL 直接绘制，不依赖浏览器）。"""
         if _HAS_JINJA2:
             tpl_html = _load_template("sign_backfill_template.html")
@@ -2393,7 +2784,8 @@ class MyPlugin(Star):
                     html = Template(tpl_html).render(
                         mcname=mcname, streak=streak, max_streak=max_streak,
                         base=self.sign_backfill_cost_per_day, step=self.sign_backfill_step,
-                        items=items, total=len(missed),
+                        items=items, total=len(missed), cards=cards,
+                        auto_use=self.sign_card_auto_use,
                     )
                     img_bytes = await _html_to_png(html, width=420)
                     if img_bytes:
@@ -2413,7 +2805,7 @@ class MyPlugin(Star):
             row_h = 30
             pad = 16
             w = 420
-            h = 90 + rows * row_h + 40
+            h = 90 + rows * row_h + 40 + 22
             img = Image.new("RGB", (w, h), "#FFF8E1")
             draw = ImageDraw.Draw(img)
             font = _get_sign_cal_font(14, self.sign_cal_font_cache_dir, self.sign_cal_font_path)
@@ -2423,7 +2815,13 @@ class MyPlugin(Star):
             draw.text((pad, 10), "补签列表", fill="#FFFFFF", font=font_b)
             draw.text((pad, 34), f"{mcname}  |  连续 {streak} 天  |  最高 {max_streak} 天", fill="#FFE0B2", font=font)
             draw.text((pad, 60), f"费用：基础 {base} 铜 + 往前每天 +{step} 铜", fill="#E65100", font=font)
-            y = 84
+            if cards > 0:
+                if self.sign_card_auto_use:
+                    card_hint = f"补签卡 {cards} 张：补签自动免铜"
+                else:
+                    card_hint = f"补签卡 {cards} 张：补签时加「卡」免铜"
+                draw.text((pad, 80), card_hint, fill="#2E7D32", font=font)
+            y = 84 + 22
             for ds in missed:
                 d = datetime.strptime(ds, "%Y-%m-%d").date()
                 days_back = (today - d).days
@@ -2451,7 +2849,28 @@ class MyPlugin(Star):
             return
         mcname = bound[0]
         # /mcsignback 2026-06-13  或  /mcsignback 13（最近30天内的某日）
+        # 可选支付方式：带「卡」用补签卡免铜，带「铜」强制花铜；都不带按 sign_card_auto_use 决定
         raw = self._tail_after_command_names(event, "mcsignback", "mcsignbackfill", "mcbq")
+        cards = self._get_sign_cards(qqid)
+        card_kw = {"卡", "补签卡", "card", "k"}
+        coin_kw = {"铜", "铜钱", "钱", "coin", "pay", "money"}
+        date_token = ""
+        pay_mode = ""
+        for token in raw.split():
+            low = token.strip().lower()
+            if low in card_kw or low in coin_kw:
+                want = "card" if low in card_kw else "coin"
+                if pay_mode and pay_mode != want:
+                    yield event.plain_result("「卡」和「铜」不能同时使用，请二选一。")
+                    return
+                pay_mode = want
+            elif not date_token:
+                date_token = token
+            else:
+                yield event.plain_result("参数过多，用法：/mcsignback [日期] [卡|铜]")
+                return
+        if not pay_mode:
+            pay_mode = "card" if (self.sign_card_auto_use and cards > 0) else "coin"
         if not raw.strip():
             # 列出最近30天可补签的日期
             now = datetime.now()
@@ -2468,7 +2887,7 @@ class MyPlugin(Star):
             streak = self._sign_consecutive_days(qqid)
             max_streak = self._sign_max_consecutive_days(qqid)
             # 尝试图片列表
-            img_bytes = await self._generate_sign_backfill_list(mcname, missed, streak, max_streak)
+            img_bytes = await self._generate_sign_backfill_list(mcname, missed, streak, max_streak, cards)
             if img_bytes:
                 try:
                     import base64
@@ -2483,6 +2902,15 @@ class MyPlugin(Star):
                 "═══ 补签 ═══",
                 f"补签费用：基础 {base} 铜 + 往前每天 +{step} 铜",
                 f"当前连续 {streak} 天  |  最高 {max_streak} 天",
+                (
+                    (
+                        f"你有 {cards} 张补签卡，补签自动免铜（想花铜可加「铜」）"
+                        if self.sign_card_auto_use
+                        else f"你有 {cards} 张补签卡，补签时加「卡」即可免铜"
+                    )
+                    if cards > 0
+                    else "没有补签卡，补签将按下方费用扣铜"
+                ),
                 "",
                 f"可补签日期（{len(missed)} 天，最近30天内）：",
             ]
@@ -2491,24 +2919,45 @@ class MyPlugin(Star):
                 day_cost = self._sign_backfill_cost(days_back)
                 lines.append(f"  {ds}  费用 {day_cost} 铜")
             lines.append("")
-            lines.append("用法：/mcsignback 2026-08-10 或 /mcsignback 20（本月的某天）")
+            lines.append("用法：/mcsignback 2026-08-10 [卡] 或 /mcsignback 20 [卡]")
+            lines.append("      /mcsignback 卡  用补签卡补最近漏签的一天")
             yield event.plain_result("\n".join(lines))
             return
-        # 解析目标日期
-        target_str = raw.strip()
+        # 解析目标日期：没给日期且用卡时，自动补最近漏签的一天
         now = datetime.now()
-        m = re.match(r"^(\d{1,2})$", target_str)
-        if m:
-            day = int(m.group(1))
-            target_date = datetime(now.year, now.month, day).date()
-        else:
-            m2 = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})$", target_str)
-            if m2:
-                target_date = datetime(int(m2.group(1)), int(m2.group(2)), int(m2.group(3))).date()
-            else:
-                yield event.plain_result("日期格式错误，请用 /mcsignback 13 或 /mcsignback 2026-06-13")
-                return
         today = now.date()
+        if not date_token:
+            if pay_mode != "card":
+                yield event.plain_result("请指定日期，例如 /mcsignback 13")
+                return
+            if cards <= 0:
+                yield event.plain_result("你没有补签卡。用法：/mcsignback <日期> 花铜补签")
+                return
+            date_token = ""
+            for i in range(1, 31):
+                cand = (today - timedelta(days=i)).strftime("%Y-%m-%d")
+                if qqid not in self._get_all_signed_qqids(cand):
+                    date_token = cand
+                    break
+            if not date_token:
+                yield event.plain_result("最近30天没有漏签，无需使用补签卡。")
+                return
+        target_str = date_token
+        m = re.match(r"^(\d{1,2})$", target_str)
+        try:
+            if m:
+                day = int(m.group(1))
+                target_date = datetime(now.year, now.month, day).date()
+            else:
+                m2 = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})$", target_str)
+                if not m2:
+                    yield event.plain_result("日期格式错误，请用 /mcsignback 13 或 /mcsignback 2026-06-13")
+                    return
+                target_date = datetime(int(m2.group(1)), int(m2.group(2)), int(m2.group(3))).date()
+        except ValueError:
+            # 例如 /mcsignback 0、2026-02-30、2026-13-01：给提示而不是抛异常
+            yield event.plain_result("日期不存在，请用 /mcsignback 13 或 /mcsignback 2026-06-13")
+            return
         if target_date >= today:
             yield event.plain_result("只能补签过去的日期。今天的签到请用 /mcsign")
             return
@@ -2522,41 +2971,81 @@ class MyPlugin(Star):
             return
         days_back = (today - target_date).days
         cost = self._sign_backfill_cost(days_back)
-        # 查询余额
-        get_cmd = f"{self.money_command_prefix} get {mcname}"
-        try:
-            resp = await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, get_cmd)
-            resp_clean = strip_mc_color(resp).strip()
-            nums = re.findall(r"[-+]?\d+(?:\.\d+)?", resp_clean)
-            if not nums:
-                yield event.plain_result(f"无法解析铜库存：{resp_clean}")
+        use_card = pay_mode == "card"
+        if use_card:
+            if self._get_sign_cards(qqid) <= 0:
+                yield event.plain_result(
+                    f"你没有补签卡，无法免铜补签 {ds}。\n"
+                    f"花 {cost} 铜补签：/mcsignback {ds} 铜"
+                )
                 return
-            balance = int(float(nums[-1]))
-        except Exception as e:
-            yield event.plain_result(f"查询库存失败：{e}")
-            return
-        if balance < cost:
-            yield event.plain_result(f"库存不足！补签 {ds} 需要 {cost} 铜，你当前有 {balance} 铜。")
-            return
-        # 扣款
-        sub_cmd = f"{self.money_command_prefix} sub {mcname} {cost}"
-        try:
-            await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, sub_cmd)
-        except Exception as e:
-            yield event.plain_result(f"扣款失败：{e}")
-            return
+        else:
+            # 查询余额
+            get_cmd = f"{self.money_command_prefix} get {mcname}"
+            try:
+                resp = await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, get_cmd)
+                resp_clean = strip_mc_color(resp).strip()
+                nums = re.findall(r"[-+]?\d+(?:\.\d+)?", resp_clean)
+                if not nums:
+                    yield event.plain_result(f"无法解析铜库存：{resp_clean}")
+                    return
+                balance = int(float(nums[-1]))
+            except Exception as e:
+                yield event.plain_result(f"查询库存失败：{e}")
+                return
+            if balance < cost:
+                yield event.plain_result(f"库存不足！补签 {ds} 需要 {cost} 铜，你当前有 {balance} 铜。")
+                return
+            # 扣款
+            sub_cmd = f"{self.money_command_prefix} sub {mcname} {cost}"
+            try:
+                await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, sub_cmd)
+            except Exception as e:
+                yield event.plain_result(f"扣款失败：{e}")
+                return
+        # 先用卡再记账：确保不会出现「没扣卡却白送一次补签」
+        if use_card:
+            if not self._use_sign_card(qqid):
+                yield event.plain_result("补签卡不足，补签失败，请重试。")
+                return
+            self._save_sign_cards()
+            self._log_sign_card("use", qqid, 1, qqid)
+            pay_line = f"消耗补签卡 ×1（剩余 {self._get_sign_cards(qqid)} 张）"
+        else:
+            pay_line = f"扣款 -{cost} 铜"
         # 记录补签（写入 backfill 列表，不混入 signers，无奖励）
         entry = self.sign_data.get(ds, {"signers": [], "backfill": []})
         if not isinstance(entry, dict):
             entry = {"signers": list(entry) if isinstance(entry, list) else [], "backfill": []}
-        entry.setdefault("backfill", []).append(qqid)
+        if not isinstance(entry.get("backfill"), list):
+            entry["backfill"] = []
+        old_backfill = list(entry["backfill"])
+        entry["backfill"].append(qqid)
         self.sign_data[ds] = entry
-        self._save_sign_data()
+        try:
+            self._save_sign_data()
+        except Exception as e:
+            # 写盘失败就把记录和卡都回滚，别让玩家「卡花了、签到也没记上」
+            logger.error(f"[mcsignback] 写入签到记录失败: {e}")
+            entry["backfill"] = old_backfill
+            if use_card:
+                self._add_sign_cards(qqid, 1)
+                try:
+                    self._save_sign_cards()
+                    self._log_sign_card("refund", qqid, 1, qqid)
+                except Exception as e2:
+                    logger.error(f"[mcsignback] 退还补签卡失败: {e2}")
+                yield event.plain_result(
+                    f"补签失败：{e}\n补签卡已退回（持有 {self._get_sign_cards(qqid)} 张），请稍后重试。"
+                )
+            else:
+                yield event.plain_result(f"补签失败：{e}\n已扣的 {cost} 铜请联系管理员补偿。")
+            return
         streak = self._sign_consecutive_days(qqid)
         max_streak = self._sign_max_consecutive_days(qqid)
         yield event.plain_result(
             f"补签成功！{ds} 已记录签到\n"
-            f"扣款 -{cost} 铜\n"
+            f"{pay_line}\n"
             f"连续 {streak} 天  |  最高 {max_streak} 天"
         )
 
@@ -2626,6 +3115,58 @@ class MyPlugin(Star):
             except Exception as e:
                 lines.append(f"  {name}: 查询失败 - {e}")
         yield event.plain_result("铜库存：\n" + "\n".join(lines))
+
+    @filter.command("mchonor", desc="查看功勋", alias={"功勋", "honor"})
+    async def mchonor(self, event: AstrMessageEvent):
+        qqid = str(event.get_sender_id())
+        raw = self._tail_after_command_names(event, "mchonor", "功勋", "honor")
+        raw = raw.strip().lstrip("@")
+        if raw:
+            # 尝试从 @ 解析 QQ 号
+            at_qq = self._resolve_at_qq(raw, event)
+            if at_qq and at_qq in self.apply_data:
+                bound_list = self.apply_data[at_qq]
+                if isinstance(bound_list, str):
+                    bound_list = [bound_list] if bound_list else []
+                if not bound_list:
+                    yield event.plain_result(f"QQ {at_qq} 没有绑定MC账号。")
+                    return
+                targets = bound_list
+            elif at_qq:
+                yield event.plain_result(f"QQ {at_qq} 没有绑定MC账号。")
+                return
+            else:
+                # 直接 MC 名（管理员查询）
+                if not self.is_admin(qqid):
+                    yield event.plain_result("只有管理员可以查询他人的功勋。")
+                    return
+                targets = [raw]
+        else:
+            bound = self.apply_data.get(qqid, [])
+            if isinstance(bound, str):
+                bound = [bound] if bound else []
+            if not bound:
+                yield event.plain_result("你还没有绑定MC账号，请先使用 /wantwl <游戏ID> 绑定。")
+                return
+            targets = bound
+        lines = []
+        for name in targets:
+            cmd = f"{self.honor_command_prefix} get {name}"
+            try:
+                resp = await rcon_command(
+                    self.rcon_host, self.rcon_port, self.rcon_password, cmd
+                )
+                cresp = _strip_rcon_log_prefix(strip_mc_color(resp))
+                if not cresp:
+                    lines.append(f"  {name}: (空响应)")
+                elif name in cresp:
+                    # 服务端一般返回 "11ya 的功勋：2086"，已经带名字了
+                    lines.append(f"  {cresp}")
+                else:
+                    lines.append(f"  {name}: {cresp}")
+            except Exception as e:
+                lines.append(f"  {name}: 查询失败 - {e}")
+        yield event.plain_result("功勋：\n" + "\n".join(lines))
 
     @filter.command("mctransfer", desc="转账铜给其他玩家", alias={"mctrans", "mczz", "投喂"})
     async def mctransfer(self, event: AstrMessageEvent):
