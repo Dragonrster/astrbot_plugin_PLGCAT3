@@ -445,7 +445,7 @@ async def rcon_command(
 
 
 @register(
-    "PLG_CAT3", "Dragonrster", "MC服务器管理插件：白名单、封禁、聊天转发、签到经济、RCON命令", "1.2.0"
+    "PLG_CAT3", "Dragonrster", "MC服务器管理插件：白名单、封禁、聊天转发、签到经济、RCON命令", "1.2.1"
 )
 class MyPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -3464,28 +3464,64 @@ class MyPlugin(Star):
         async for msg in self.execute_and_reply(event, command, "插件列表"):
             yield msg
 
+    # 玩家统计文件相对 world 目录的位置：26.1 起从 stats/ 迁到 players/stats/
+    _STATS_SUBDIRS = ("players/stats", "stats")
+
+    def _stats_local_candidates(self, uuid: str) -> list[str]:
+        """按版本顺序返回本地统计文件候选路径（26.1+ 优先，旧版兜底）。"""
+        bases: list[str] = []
+        local_path = self.mc_stats_world_path
+        if local_path:
+            bases.append(local_path)
+            # 兼容 mc_stats_world_path 误配成服务器根目录的情况
+            bases.append(os.path.join(local_path, "world"))
+        candidates: list[str] = []
+        for base in bases:
+            for sub in self._STATS_SUBDIRS:
+                candidates.append(os.path.join(base, *sub.split("/"), f"{uuid}.json"))
+        return candidates
+
+    @staticmethod
+    def _stats_remote_candidates(uuid: str) -> list[str]:
+        """MCSM 面板上的统计文件候选路径（26.1+ 优先，旧版兜底）。"""
+        return [
+            f"/world/players/stats/{uuid}.json",
+            f"/world/stats/{uuid}.json",
+        ]
+
+    def _stats_not_found_hint(self) -> str:
+        """找不到统计文件时给出定位提示。"""
+        mode = f"本地目录 {self.mc_stats_world_path}" if self.mc_stats_world_path else "未配置本地目录"
+        if self.mcsm_panel_url and self.mcsm_api_key:
+            mode += " + MCSM 面板"
+        return (
+            f"（已尝试：world/players/stats/（26.1+）与 world/stats/（旧版）；当前读取方式：{mode}）"
+        )
+
     async def _get_player_stats(self, mcname: str) -> dict | None:
         """读取玩家统计 JSON，优先本地文件，兜底 MCSM API。"""
         uuid = mc_offline_uuid(mcname)
-        stats_file = f"/world/stats/{uuid}.json"
-        # 方式1：本地文件
-        local_path = self.mc_stats_world_path
-        if local_path:
-            full_path = os.path.join(local_path, "stats", f"{uuid}.json")
-            if os.path.isfile(full_path):
-                try:
-                    with open(full_path, "r", encoding="utf-8") as f:
-                        return json.load(f)
-                except Exception as e:
-                    logger.warning(f"[mcstats] 本地读取失败: {full_path} -> {e}")
+        # 方式1：本地文件（26.1+ 在 players/stats/，旧版在 stats/）
+        for full_path in self._stats_local_candidates(uuid):
+            if not os.path.isfile(full_path):
+                continue
+            try:
+                with open(full_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                logger.debug(f"[mcstats] 统计来源: {full_path}")
+                return data
+            except Exception as e:
+                logger.warning(f"[mcstats] 本地读取失败: {full_path} -> {e}")
         # 方式2：MCSM API
         if self.mcsm_panel_url and self.mcsm_api_key:
-            content = await mcsm_read_file(
-                self.mcsm_panel_url, self.mcsm_api_key,
-                self.mcsm_instance_uuid, self.mcsm_daemon_uuid,
-                stats_file,
-            )
-            if content:
+            for remote_path in self._stats_remote_candidates(uuid):
+                content = await mcsm_read_file(
+                    self.mcsm_panel_url, self.mcsm_api_key,
+                    self.mcsm_instance_uuid, self.mcsm_daemon_uuid,
+                    remote_path,
+                )
+                if not content:
+                    continue
                 try:
                     return json.loads(content)
                 except Exception as e:
@@ -3522,7 +3558,10 @@ class MyPlugin(Star):
                 # 直接输入 MC 名
                 stats = await self._get_player_stats(raw)
                 if stats is None:
-                    yield event.plain_result(f"未找到玩家 {raw} 的统计数据。")
+                    yield event.plain_result(
+                        f"未找到玩家 {raw} 的统计数据（UUID: {mc_offline_uuid(raw)}）。\n"
+                        f"{self._stats_not_found_hint()}"
+                    )
                     return
                 async for msg in self._send_stats_result(event, raw, stats):
                     yield msg
@@ -3534,7 +3573,10 @@ class MyPlugin(Star):
         mcname = bound[0]
         stats = await self._get_player_stats(mcname)
         if stats is None:
-            yield event.plain_result(f"未找到 {mcname} 的统计数据（UUID: {mc_offline_uuid(mcname)}）。")
+            yield event.plain_result(
+                f"未找到 {mcname} 的统计数据（UUID: {mc_offline_uuid(mcname)}）。\n"
+                f"{self._stats_not_found_hint()}"
+            )
             return
         async for msg in self._send_stats_result(event, mcname, stats):
             yield msg

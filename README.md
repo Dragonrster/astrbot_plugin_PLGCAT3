@@ -56,6 +56,15 @@
 | `enable_apply_whitelist` | 允许玩家自助申请白名单                                                   | `false` |
 | `whitelist_verify_mode`  | 验证方式：`code`（游戏内验证码）、`online`（需在线）、`none`（直接绑定） | `code`  |
 
+### 玩家统计（/mcstats）
+
+| 配置项                                                                        | 说明                                                            | 默认值 |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------------- | ------ |
+| `mc_stats_world_path`                                                         | 服务器 `world` 目录的绝对路径（如 `/mc_server/world`）；留空则通过 MCSM 面板读取 | 空     |
+| `mcsm_panel_url` / `mcsm_api_key` / `mcsm_instance_uuid` / `mcsm_daemon_uuid`  | 走 MCSM 面板读取统计文件时需配置                                 | —      |
+
+统计文件位置随游戏版本变化：**26.1 起**位于 `world/players/stats/<UUID>.json`；**26.0 及以前**位于 `world/stats/<UUID>.json`。插件会按顺序自动尝试两种位置（本地目录与 MCSM 面板均如此），`mc_stats_world_path` 始终填 `world` 目录本身即可，无需手动迁移。
+
 ### 签到经济
 
 | 配置项                              | 说明                                                                  | 默认值                        |
@@ -110,6 +119,7 @@
 | 命令                                 | 说明                      |
 | ------------------------------------ | ------------------------- |
 | `/mclist`                            | 在线玩家列表（mcl）       |
+| `/mcstats [游戏ID\|@某人]`           | 玩家统计（mcstat）        |
 | `/mcplugins`                         | 插件列表                  |
 | `[管] /mctps`                        | 查看 TPS                  |
 | `[管] /mcsparkhealth`                | Spark 健康报告（mcspark） |

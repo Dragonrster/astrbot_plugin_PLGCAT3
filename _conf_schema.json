@@ -231,7 +231,7 @@
     "description": "服务器 world 目录路径",
     "type": "string",
     "default": "",
-    "hint": "留空通过 MCSM 读取。例如 /mc_server/world"
+    "hint": "留空通过 MCSM 读取。例如 /mc_server/world。26.1 起统计文件位于 world/players/stats/，旧版位于 world/stats/，插件会按顺序自动尝试"
   },
   "sign_cal_font_path": {
     "description": "签到日历自定义字体路径",
