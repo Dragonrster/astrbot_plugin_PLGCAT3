@@ -222,6 +222,11 @@
     "type": "bool",
     "default": false
   },
+  "silent_mcid": {
+    "description": "静默：绑定查询（/mcid）不回复",
+    "type": "bool",
+    "default": false
+  },
   "mc_stats_world_path": {
     "description": "服务器 world 目录路径",
     "type": "string",

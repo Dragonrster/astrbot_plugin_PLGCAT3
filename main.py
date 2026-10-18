@@ -445,7 +445,7 @@ async def rcon_command(
 
 
 @register(
-    "PLG_CAT3", "Dragonrster", "MC服务器管理插件：白名单、封禁、聊天转发、签到经济、RCON命令", "1.1.9"
+    "PLG_CAT3", "Dragonrster", "MC服务器管理插件：白名单、封禁、聊天转发、签到经济、RCON命令", "1.2.0"
 )
 class MyPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -497,6 +497,7 @@ class MyPlugin(Star):
         self.silent_card = _as_bool(self.config.get("silent_card", False))
         self.silent_money = _as_bool(self.config.get("silent_money", False))
         self.silent_honor = _as_bool(self.config.get("silent_honor", False))
+        self.silent_mcid = _as_bool(self.config.get("silent_mcid", False))
         self.transfer_log_file = os.path.join(self.plugin_data_dir, "transfer_log.jsonl")
         self.red_packet_file = os.path.join(self.plugin_data_dir, "red_packets.json")
         self.red_packets = self._load_red_packets()
@@ -753,8 +754,51 @@ class MyPlugin(Star):
             if (isinstance(names, list) and names) or (isinstance(names, str) and names)
         )
 
+    def _bound_names(self, qqid: str) -> list[str]:
+        """取一个 QQ 绑定的游戏ID列表（兼容历史 str 格式）。"""
+        names = self.apply_data.get(str(qqid))
+        if isinstance(names, str):
+            names = [names]
+        if not isinstance(names, list):
+            return []
+        return [str(n).strip() for n in names if str(n).strip()]
+
+    def _qqs_by_mcname(self, mcname: str) -> list[str]:
+        """按游戏ID反查绑定它的 QQ（精确匹配优先，其次忽略大小写）。"""
+        target = str(mcname or "").strip()
+        if not target:
+            return []
+        folded = target.lower()
+        exact: list[str] = []
+        loose: list[str] = []
+        for qqid in self.apply_data:
+            names = self._bound_names(qqid)
+            if target in names:
+                exact.append(str(qqid))
+            elif folded in (n.lower() for n in names):
+                loose.append(str(qqid))
+        return sorted(set(exact) or set(loose))
+
+    def _mcname_owner(self, mcname: str) -> str:
+        """游戏ID -> 唯一 QQ：主账号持有者优先；多个归属且无法判定时返回空串。"""
+        qqs = self._qqs_by_mcname(mcname)
+        if not qqs:
+            return ""
+        target = str(mcname or "").strip().lower()
+        mains = [q for q in qqs if (self._bound_names(q) or [""])[0].lower() == target]
+        if len(mains) == 1:
+            return mains[0]
+        return qqs[0] if len(qqs) == 1 else ""
+
+    def _card_target_error(self, token: str) -> str:
+        """补签卡目标解析失败时的提示（区分「绑定多个QQ」的情况）。"""
+        qqs = self._qqs_by_mcname(token)
+        if len(qqs) > 1:
+            return "该游戏ID绑定了多个QQ：" + "、".join(qqs) + "\n请直接写 QQ 号指定。"
+        return "无法识别目标，请用 @某人、QQ 号或已绑定的游戏ID（如 /mccard give Steve 2）。"
+
     def _resolve_card_target(self, token: str, event: AstrMessageEvent) -> str:
-        """把 give/take/info 的目标解析成 QQ：纯数字 / 昵称(QQ) / @某人。
+        """把 give/take/info 的目标解析成 QQ：纯数字 / 昵称(QQ) / @某人 / 已绑定游戏ID。
 
         显式写出的 QQ 号优先于消息里的 @ 段——否则「给 Bob(12345) 发卡」会被
         同一条消息里的另一个 @ 顶掉，发到无关玩家头上。
@@ -767,7 +811,10 @@ class MyPlugin(Star):
             return m.group(1)
         qq = self._resolve_at_qq(t, event)
         qq = str(qq or "").strip()
-        return qq if re.fullmatch(r"\d{5,11}", qq) else ""
+        if re.fullmatch(r"\d{5,11}", qq):
+            return qq
+        # 也支持直接写已绑定的游戏ID（如 /mccard give Steve 2）
+        return self._mcname_owner(t)
 
     @staticmethod
     def _parse_card_count(token: str) -> int | None:
@@ -1985,12 +2032,13 @@ class MyPlugin(Star):
                 "  /mcsigncal  签到日历（/mcqc）",
                 "  /mcsignback [日期] [卡|铜]  补签（/mcbq）",
                 "  /mccard  补签卡：查看自己持有（/补签卡，/bqk）",
-                "  [管] /mccard give <QQ|@某人> <数量>  发放补签卡",
+                "  [管] /mccard give <QQ|@某人|游戏ID> <数量>  发放补签卡",
                 "  [管] /mccard giveall <数量>  一键发放给所有已绑定账号的人",
-                "  [管] /mccard take <QQ|@某人> <数量|all>  回收补签卡",
+                "  [管] /mccard take <QQ|@某人|游戏ID> <数量|all>  回收补签卡",
                 "  [管] /mccard list  查看持有人排行（/mccard help 看全部用法）",
                 "  /mcmoney  查询铜库存（/库存，/mcq）",
                 "  /mchonor  查询功勋（/功勋）",
+                "  /mcid <游戏ID>  按游戏ID反查绑定的QQ（/查绑定）",
                 "  /mctransfer <游戏ID> <数量>  投喂转账（/投喂，/mctrans，/mczz）",
                 "  [管] /mcsignreset  重置签到记录（/mcsignr）",
                 "  [管] /mcsignadmin  签到数据管理（/msa）",
@@ -2551,11 +2599,12 @@ class MyPlugin(Star):
                 "  /mcsignback <日期> 铜  不用卡，改花铜补签",
                 "",
                 "管理员：",
-                "  /mccard give <QQ|@某人> <数量>  发放给指定人",
+                "  /mccard give <QQ|@某人|游戏ID> <数量>  发放给指定人",
                 "  /mccard giveall <数量>  一键发放给所有已绑定账号的人",
-                "  /mccard take <QQ|@某人> <数量|all>  回收",
-                "  /mccard info [QQ|@某人]  查询持有量",
+                "  /mccard take <QQ|@某人|游戏ID> <数量|all>  回收",
+                "  /mccard info [QQ|@某人|游戏ID]  查询持有量",
                 "  /mccard list  持有人列表",
+                "  /mcid <游戏ID>  按游戏ID反查绑定的QQ",
                 f"  单人上限 {self.sign_card_max} 张（配置 sign_card_max）",
             ]
         )
@@ -2592,7 +2641,7 @@ class MyPlugin(Star):
                     return
                 target = self._resolve_card_target(args[0], event)
                 if not target:
-                    yield event.plain_result("无法识别目标，请用 @某人 或直接写 QQ 号。")
+                    yield event.plain_result(self._card_target_error(args[0]))
                     return
             count = self._get_sign_cards(target)
             if target == qqid:
@@ -2621,12 +2670,12 @@ class MyPlugin(Star):
                 yield event.plain_result("抱歉，你没有权限执行此操作。")
                 return
             if len(args) < 2:
-                yield event.plain_result("用法：/mccard give <QQ|@某人> <数量>")
+                yield event.plain_result("用法：/mccard give <QQ|@某人|游戏ID> <数量>")
                 return
             target = self._resolve_card_target(args[0], event)
             count = self._parse_card_count(args[1])
             if not target:
-                yield event.plain_result("无法识别目标，请用 @某人 或直接写 QQ 号。")
+                yield event.plain_result(self._card_target_error(args[0]))
                 return
             if count is None:
                 yield event.plain_result("数量必须是 1~10000 的整数。")
@@ -2690,11 +2739,11 @@ class MyPlugin(Star):
                 yield event.plain_result("抱歉，你没有权限执行此操作。")
                 return
             if not args:
-                yield event.plain_result("用法：/mccard take <QQ|@某人> <数量|all>")
+                yield event.plain_result("用法：/mccard take <QQ|@某人|游戏ID> <数量|all>")
                 return
             target = self._resolve_card_target(args[0], event)
             if not target:
-                yield event.plain_result("无法识别目标，请用 @某人 或直接写 QQ 号。")
+                yield event.plain_result(self._card_target_error(args[0]))
                 return
             if len(args) >= 2 and args[1].lower() in ("all", "全部"):
                 removed, left = self._take_sign_cards(target, None)
@@ -2705,7 +2754,7 @@ class MyPlugin(Star):
                     return
                 removed, left = self._take_sign_cards(target, count)
             else:
-                yield event.plain_result("用法：/mccard take <QQ|@某人> <数量|all>")
+                yield event.plain_result("用法：/mccard take <QQ|@某人|游戏ID> <数量|all>")
                 return
             self._save_sign_cards()
             if removed <= 0:
@@ -3208,6 +3257,54 @@ class MyPlugin(Star):
             except Exception as e:
                 lines.append(f"  {name}: 查询失败 - {e}")
         yield event.plain_result("功勋：\n" + "\n".join(lines))
+
+    @filter.command("mcid", desc="按游戏ID反查绑定的QQ", alias={"查绑定", "mcbind", "bindinfo"})
+    @_silent_command("silent_mcid")
+    async def mcid(self, event: AstrMessageEvent):
+        """游戏ID -> QQ 反查（管理员可查任意玩家；普通玩家只能查自己的游戏ID）。"""
+        qqid = str(event.get_sender_id())
+        admin = self.is_admin(qqid)
+        raw = self._tail_after_command_names(event, "mcid", "查绑定", "mcbind", "bindinfo")
+        target = raw.strip().lstrip("@")
+        if not target:
+            names = self._bound_names(qqid)
+            if not names:
+                yield event.plain_result("你还没有绑定任何MC账号，使用 /wantwl <游戏ID> 申请绑定。")
+                return
+            lines = [f"你绑定的MC账号（QQ {qqid}）："]
+            for i, name in enumerate(names, 1):
+                lines.append(f"  {i}. {name}" + ("  （主账号）" if i == 1 else ""))
+            lines.append("按游戏ID反查QQ：/mcid <游戏ID>（管理员可查任意玩家）")
+            yield event.plain_result("\n".join(lines))
+            return
+        qqs = self._qqs_by_mcname(target)
+        if not qqs:
+            yield event.plain_result(
+                f"没有找到绑定游戏ID {target} 的QQ。\n"
+                "可能拼写有误，或该玩家还没有用 /wantwl 绑定。"
+            )
+            return
+        if not admin and qqid not in qqs:
+            yield event.plain_result("只有管理员可以查询他人绑定的QQ。")
+            return
+        lines = [f"绑定查询：{target}"]
+        for q in qqs:
+            names = self._bound_names(q)
+            others = [n for n in names if n.lower() != target.lower()]
+            is_main = bool(names) and names[0].lower() == target.lower()
+            lines.append(f"  QQ：{q}（{'主账号' if is_main else '副账号'}）")
+            if others:
+                lines.append(f"    同QQ其它绑定：{'、'.join(others)}")
+            if admin:
+                lines.append(
+                    f"    签到：累计 {self._get_total_sign_days(q)} 天"
+                    f" | 当前连续 {self._sign_consecutive_days(q)} 天"
+                    f" | 最高 {self._sign_max_consecutive_days(q)} 天"
+                    f" | 补签卡 {self._get_sign_cards(q)} 张"
+                )
+        if len(qqs) > 1:
+            lines.append("注意：该游戏ID被多个QQ绑定，请核对。")
+        yield event.plain_result("\n".join(lines))
 
     @filter.command("mctransfer", desc="转账铜给其他玩家", alias={"mctrans", "mczz", "投喂"})
     async def mctransfer(self, event: AstrMessageEvent):

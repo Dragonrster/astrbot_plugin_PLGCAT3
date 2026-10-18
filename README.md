@@ -76,6 +76,7 @@
 | `silent_card`                       | 静默：补签卡（/mccard）不回复                                         | `false`                       |
 | `silent_money`                      | 静默：余额查询（/mcmoney）不回复                                      | `false`                       |
 | `silent_honor`                      | 静默：功勋查询（/mchonor）不回复                                      | `false`                       |
+| `silent_mcid`                       | 静默：绑定查询（/mcid）不回复                                         | `false`                       |
 | `sign_cal_font_path`                | 签到日历自定义字体路径（留空自动检测）                                | —                             |
 
 **静默模式（防刷屏）**：`silent_*` 系列开关打开后，对应命令**照常执行**（照常发铜、记录签到、扣款、消耗补签卡、发放补签卡），只是**不发送任何回复**（成功、失败提示都不发）。适合人多的群屏蔽每日签到、补签等刷屏消息。
@@ -92,6 +93,7 @@
 | `/wantwl <游戏ID>`                   | 申请绑定（需私聊）        |
 | `/wantwllist`                        | 查看已绑定账号（wantwll） |
 | `/wantwlunbind <游戏ID>`             | 解绑（wantwlu）           |
+| `/mcid [游戏ID]`                     | 按游戏ID反查绑定的QQ（查绑定；不带参数看自己的绑定；查他人需管理员） |
 
 ### 封禁
 
@@ -130,15 +132,18 @@
 | `/mcsigncal`                          | 查看签到日历图片（mcsigncalendar）                               |
 | `/mcsignback [日期] [卡\|铜]`         | 补签：默认花铜，持卡自动免铜（mcbq）                             |
 | `/mccard`                             | 查看自己持有的补签卡（mcsigncard、补签卡、bqk）                  |
-| `[管] /mccard give <QQ\|@某人> <数量>`| 发放补签卡                                                       |
+| `[管] /mccard give <QQ\|@某人\|游戏ID> <数量>`| 发放补签卡（游戏ID会反查绑定的QQ）                        |
 | `[管] /mccard giveall <数量>`         | 一键发放给所有已绑定 MC 账号的人                                 |
-| `[管] /mccard take <QQ\|@某人> <数量\|all>` | 回收补签卡                                                 |
+| `[管] /mccard take <QQ\|@某人\|游戏ID> <数量\|all>` | 回收补签卡                                         |
 | `[管] /mccard list`                   | 补签卡持有人列表                                                 |
+| `/mcid [游戏ID]`                      | 按游戏ID反查绑定的QQ（查绑定；不带参数看自己的绑定；查他人需管理员） |
 | `/mcmoney`                            | 查询铜钱余额（mcqian）                                           |
 | `/mchonor [游戏ID\|@某人]`            | 查询功勋（功勋、honor；指定 MC 名查他人需管理员）                |
 | `/mctransfer <游戏ID> <数量>`         | 转账（mczz）                                                     |
 
 **功勋查询**：`/mchonor`（或 `/功勋`）会查询你自己已绑定 MC 账号的功勋；管理员可用 `/mchonor <游戏ID>` 或 `/mchonor @某人` 查他人。实际执行的服务端命令为 `<honor_command_prefix> get <游戏ID>`（默认 `dbc honor get <游戏ID>`），并把服务端返回的功勋文本原样展示。
+
+**绑定反查（游戏ID → QQ）**：`/mcid <游戏ID>`（或 `/查绑定`、`/mcbind`）会反查绑定该游戏ID的QQ，并显示是主账号还是副账号、同一QQ的其它绑定；管理员查询时还会带上签到天数与补签卡数量。不带参数时显示自己绑定的所有MC账号。普通玩家只能查自己的游戏ID，查他人需要管理员。管理员发放补签卡时可直接写游戏ID，例如 `/mccard give Steve 2`，无需先查QQ号。
 
 **补签卡**：由管理员发放，玩家补签时免铜（不扣铜钱）。
 
