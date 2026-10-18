@@ -70,7 +70,15 @@
 | `sign_streak_bonus`                 | 连续签到加成（连续N天 = N×该值，封顶 2000）                           | `20`                          |
 | `sign_card_auto_use`                | 持有补签卡时补签自动免铜（关闭后需显式发送 `卡`）                     | `true`                        |
 | `sign_card_max`                     | 单个玩家可持有的补签卡上限                                            | `99`                          |
+| `silent_sign`                       | 静默：签到（/mcsign）不回复                                           | `false`                       |
+| `silent_sign_cal`                   | 静默：签到日历（/mcsigncal）不回复                                    | `false`                       |
+| `silent_sign_backfill`              | 静默：补签（/mcsignback）不回复                                       | `false`                       |
+| `silent_card`                       | 静默：补签卡（/mccard）不回复                                         | `false`                       |
+| `silent_money`                      | 静默：余额查询（/mcmoney）不回复                                      | `false`                       |
+| `silent_honor`                      | 静默：功勋查询（/mchonor）不回复                                      | `false`                       |
 | `sign_cal_font_path`                | 签到日历自定义字体路径（留空自动检测）                                | —                             |
+
+**静默模式（防刷屏）**：`silent_*` 系列开关打开后，对应命令**照常执行**（照常发铜、记录签到、扣款、消耗补签卡、发放补签卡），只是**不发送任何回复**（成功、失败提示都不发）。适合人多的群屏蔽每日签到、补签等刷屏消息。
 
 ## 命令列表
 

@@ -1,5 +1,6 @@
 import asyncio
 import calendar
+import functools
 import io
 import json
 import random
@@ -114,6 +115,33 @@ def _strip_rcon_log_prefix(text: str) -> str:
     只清理「时间戳 + 日志级别标签」，普通方括号内容（如 "[功勋] xxx"）保持原样。
     """
     return _RCON_LOG_PREFIX_RE.sub("", text or "").strip()
+
+
+def _silent_command(flag_attr: str):
+    """命令级静默装饰器：开关打开时命令照常执行，只是不把回复发出去（防刷屏）。
+
+    用法（filter.command 必须在最外层）::
+
+        @filter.command("mcsign", ...)
+        @_silent_command("silent_sign")
+        async def mcsign(self, event): ...
+    """
+
+    def decorator(func):
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            plugin = args[0] if args else None
+            if plugin is not None and getattr(plugin, flag_attr, False):
+                # 仍然把生成器跑完，保证签到/扣款/写文件等副作用正常发生
+                async for _ in func(*args, **kwargs):
+                    pass
+                return
+            async for result in func(*args, **kwargs):
+                yield result
+
+        return wrapper
+
+    return decorator
 
 
 def _as_bool(value, default: bool = False) -> bool:
@@ -417,7 +445,7 @@ async def rcon_command(
 
 
 @register(
-    "PLG_CAT3", "Dragonrster", "MC服务器管理插件：白名单、封禁、聊天转发、签到经济、RCON命令", "1.1.8"
+    "PLG_CAT3", "Dragonrster", "MC服务器管理插件：白名单、封禁、聊天转发、签到经济、RCON命令", "1.1.9"
 )
 class MyPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -462,6 +490,13 @@ class MyPlugin(Star):
             self.sign_card_max = max(1, int(self.config.get("sign_card_max", 99)))
         except (TypeError, ValueError):
             self.sign_card_max = 99
+        # 静默回复开关（防刷屏）：True = 命令照常执行，但不发送任何回复
+        self.silent_sign = _as_bool(self.config.get("silent_sign", False))
+        self.silent_sign_cal = _as_bool(self.config.get("silent_sign_cal", False))
+        self.silent_sign_backfill = _as_bool(self.config.get("silent_sign_backfill", False))
+        self.silent_card = _as_bool(self.config.get("silent_card", False))
+        self.silent_money = _as_bool(self.config.get("silent_money", False))
+        self.silent_honor = _as_bool(self.config.get("silent_honor", False))
         self.transfer_log_file = os.path.join(self.plugin_data_dir, "transfer_log.jsonl")
         self.red_packet_file = os.path.join(self.plugin_data_dir, "red_packets.json")
         self.red_packets = self._load_red_packets()
@@ -2272,6 +2307,7 @@ class MyPlugin(Star):
         yield event.plain_result(f"已切换主游戏账号为 {mcname}。\n当前绑定：{'、'.join(bound)}")
 
     @filter.command("mcsign", desc="每日签到领铜", alias={"mcqd", "签到", "jrrp"})
+    @_silent_command("silent_sign")
     async def mcsign(self, event: AstrMessageEvent):
         if not self.enable_sign:
             yield event.plain_result("抱歉，签到功能未开启。")
@@ -2525,6 +2561,7 @@ class MyPlugin(Star):
         )
 
     @filter.command("mccard", desc="补签卡（管理员发放，补签免铜）", alias={"mcsigncard", "补签卡", "bqk"})
+    @_silent_command("silent_card")
     async def mccard(self, event: AstrMessageEvent):
         qqid = str(event.get_sender_id())
         admin = self.is_admin(qqid)
@@ -2703,6 +2740,7 @@ class MyPlugin(Star):
         yield event.plain_result(f"未知操作：{action}\n\n{usage_hint()}")
 
     @filter.command("mcsigncal", desc="查看签到日历", alias={"mcsigncalendar", "mcqc"})
+    @_silent_command("silent_sign_cal")
     async def mcsigncal(self, event: AstrMessageEvent):
         if not self.enable_sign:
             yield event.plain_result("抱歉，签到功能未开启。")
@@ -2838,6 +2876,7 @@ class MyPlugin(Star):
             return None
 
     @filter.command("mcsignback", desc="补签（花铜补往日签到）", alias={"mcsignbackfill", "mcbq"})
+    @_silent_command("silent_sign_backfill")
     async def mcsignback(self, event: AstrMessageEvent):
         if not self.enable_sign:
             yield event.plain_result("抱歉，签到功能未开启。")
@@ -3073,6 +3112,7 @@ class MyPlugin(Star):
         return ""
 
     @filter.command("mcmoney", desc="查询铜库存", alias={"mcq", "库存"})
+    @_silent_command("silent_money")
     async def mcmoney(self, event: AstrMessageEvent):
         qqid = str(event.get_sender_id())
         raw = self._tail_after_command_names(event, "mcmoney", "mcq", "库存")
@@ -3117,6 +3157,7 @@ class MyPlugin(Star):
         yield event.plain_result("铜库存：\n" + "\n".join(lines))
 
     @filter.command("mchonor", desc="查看功勋", alias={"功勋", "honor"})
+    @_silent_command("silent_honor")
     async def mchonor(self, event: AstrMessageEvent):
         qqid = str(event.get_sender_id())
         raw = self._tail_after_command_names(event, "mchonor", "功勋", "honor")

@@ -188,6 +188,40 @@
     "default": 99,
     "hint": "最小 1；管理员 /mccard give|giveall 不得超过该上限"
   },
+  "silent_sign": {
+    "description": "静默：每日签到（/mcsign）不回复",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后命令照常执行（照常发铜、记录签到），只是不发送任何回复，防止刷屏"
+  },
+  "silent_sign_cal": {
+    "description": "静默：签到日历（/mcsigncal）不回复",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后不发送日历图片，防止刷屏"
+  },
+  "silent_sign_backfill": {
+    "description": "静默：补签（/mcsignback）不回复",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后照常补签/扣铜/消耗补签卡，只是不回复"
+  },
+  "silent_card": {
+    "description": "静默：补签卡查询/发放（/mccard）不回复",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后管理员发放、查询补签卡均不回复（操作依然生效）"
+  },
+  "silent_money": {
+    "description": "静默：铜钱余额查询（/mcmoney）不回复",
+    "type": "bool",
+    "default": false
+  },
+  "silent_honor": {
+    "description": "静默：功勋查询（/mchonor）不回复",
+    "type": "bool",
+    "default": false
+  },
   "mc_stats_world_path": {
     "description": "服务器 world 目录路径",
     "type": "string",
