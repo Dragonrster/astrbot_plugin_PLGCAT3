@@ -445,7 +445,7 @@ async def rcon_command(
 
 
 @register(
-    "PLG_CAT3", "Dragonrster", "MC服务器管理插件：白名单、封禁、聊天转发、签到经济、RCON命令", "1.2.1"
+    "PLG_CAT3", "Dragonrster", "MC服务器管理插件：白名单、封禁、聊天转发、签到经济、RCON命令", "1.2.2"
 )
 class MyPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -475,6 +475,13 @@ class MyPlugin(Star):
         self.sign_backfill_cost_per_day = int(self.config.get("sign_backfill_cost_per_day", 50))
         self.sign_backfill_step = int(self.config.get("sign_backfill_step", 100))  # 补签每早一天递增
         self.sign_streak_bonus = int(self.config.get("sign_streak_bonus", 20))  # 连续签到每连续一天加成
+        # 签到功勋奖励：每次正常签到固定发放，不随连续天数累加，补签不发
+        self.enable_sign_honor = _as_bool(self.config.get("enable_sign_honor", True), True)
+        self.sign_honor_command = str(self.config.get("sign_honor_command", "d honor add {name} {amount}")).strip() or "d honor add {name} {amount}"
+        try:
+            self.sign_honor_amount = max(0, int(self.config.get("sign_honor_amount", 10)))
+        except (TypeError, ValueError):
+            self.sign_honor_amount = 10
         self.sign_cal_font_path = str(self.config.get("sign_cal_font_path", "") or "").strip()
         self.sign_cal_font_cache_dir = os.path.join(self.plugin_data_dir, "fonts")
         self.sign_file = os.path.join(self.plugin_data_dir, "sign_data.json")
@@ -1046,6 +1053,7 @@ class MyPlugin(Star):
         yesterday_count: int, today_count: int, streak: int, max_streak: int,
         fortune: dict, no_reward_reason: str = "",
         base_reward: int = 0, bonus_desc: str = "", total_days: int = 0,
+        honor: int = 0,
     ) -> bytes | None:
         """生成签到结果卡片图片，优先 HTML 模板，兜底 PIL。"""
         is_already_signed = "已签到" in no_reward_reason
@@ -1064,7 +1072,7 @@ class MyPlugin(Star):
                         base_reward=base_reward, bonus_desc=bonus_desc,
                         today_count=today_count, total_days=total_days,
                         streak=streak, max_streak=max_streak,
-                        fortune=fortune,
+                        fortune=fortune, honor=honor,
                     )
                     img_bytes = await _html_to_png(html, width=420)
                     if img_bytes:
@@ -1103,6 +1111,15 @@ class MyPlugin(Star):
             draw.text((30 + (bw[2] - bw[0]) + 10, y + 42), "  |  ".join(info_parts), fill="#999999", font=font)
         else:
             draw.text((30, y + 20), no_reward_reason or "签到成功", fill="#999999", font=font)
+        # 签到功勋奖励角标
+        if honor > 0:
+            honor_txt = f"功勋 +{honor}"
+            hb = draw.textbbox((0, 0), honor_txt, font=font)
+            hw = hb[2] - hb[0]
+            hx2 = w - 28
+            hx1 = hx2 - hw - 16
+            draw.rectangle([hx1, y + 8, hx2, y + 32], fill="#E8F5E9", outline="#4CAF50", width=1)
+            draw.text((hx1 + 8, y + 11), honor_txt, fill="#2E7D32", font=font)
         y += 95
         # 连续加成 = 连续签到 N 天 × sign_streak_bonus（封顶2000）
         streak_val = min(streak * self.sign_streak_bonus, 2000) if streak > 0 else 0
@@ -2028,7 +2045,7 @@ class MyPlugin(Star):
                 "  [管] /销 <编号>  ",
                 "",
                 "【签到经济】",
-                f"  /mcsign  每日签到+占卜（/签到，/mcqd，/jrrp）{sign}",
+                f"  /mcsign  每日签到+占卜，发铜+功勋（/签到，/mcqd，/jrrp）{sign}",
                 "  /mcsigncal  签到日历（/mcqc）",
                 "  /mcsignback [日期] [卡|铜]  补签（/mcbq）",
                 "  /mccard  补签卡：查看自己持有（/补签卡，/bqk）",
@@ -2440,11 +2457,23 @@ class MyPlugin(Star):
                 yield event.plain_result(f"签到失败：{e}")
                 return
 
+        # 签到功勋奖励：每次正常签到固定发放，不随连续天数累加，补签不发
+        honor = 0
+        honor_failed = False
+        if mcname and self.enable_sign_honor and self.sign_honor_amount > 0:
+            honor_cmd = self.sign_honor_command.replace("{name}", mcname).replace("{amount}", str(self.sign_honor_amount))
+            try:
+                await rcon_command(self.rcon_host, self.rcon_port, self.rcon_password, honor_cmd)
+                honor = self.sign_honor_amount
+            except Exception as e:
+                honor_failed = True
+                logger.warning(f"[mcsign] 功勋发放失败: {e}")
+
         # 尝试图片卡片
         card_img = await self._generate_sign_card(
             user_name, mcname, reward, pool, yesterday_count,
             today_count, streak, max_streak, fortune, no_reward_reason,
-            base_reward, streak_desc, total_days,
+            base_reward, streak_desc, total_days, honor=honor,
         )
         if card_img:
             try:
@@ -2465,6 +2494,10 @@ class MyPlugin(Star):
             if streak_bonus > 0:
                 parts_info.append(f"连续加成 +{streak_bonus}")
             lines[0] = f"签到成功！{mcname} +{reward} 铜（{'  '.join(parts_info)}）"
+        if honor > 0:
+            lines.append(f"功勋 +{honor}")
+        elif honor_failed:
+            lines.append("功勋发放失败，请联系管理员补发。")
         lines.append(f"今日 {today_count} 人  |  累计 {total_days} 天  |  连续 {streak} 天  |  最高 {max_streak} 天")
         lines.append(f"今日占卜：{fortune['level']}  幸运色 {fortune['color']}  幸运数字 {fortune['number']}")
         lines.append(f"签文：{fortune['message']}")

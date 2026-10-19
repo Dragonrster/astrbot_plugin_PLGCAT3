@@ -18,6 +18,7 @@ body { font-family: "Noto Sans SC", "Microsoft YaHei", "PingFang SC", "WenQuanYi
 .reward-box .label { font-size: 12px; color: #666; }
 .reward-box .amount { font-size: 32px; font-weight: bold; color: #E65100; display: inline-block; margin-top: 4px; }
 .reward-box .info { font-size: 11px; color: #999; display: inline-block; margin-left: 10px; vertical-align: bottom; margin-bottom: 6px; }
+.reward-box .honor { display: inline-block; font-size: 12px; font-weight: bold; color: #2E7D32; background: #E8F5E9; border: 1px solid #4CAF50; border-radius: 4px; padding: 1px 8px; margin-left: 8px; vertical-align: bottom; margin-bottom: 6px; }
 .reward-box .no-reward { font-size: 13px; color: #999; padding: 8px 0; }
 
 .stats { display: flex; margin: 12px 15px; gap: 6px; }
@@ -78,6 +79,7 @@ body { font-family: "Noto Sans SC", "Microsoft YaHei", "PingFang SC", "WenQuanYi
     奖池 {{ pool }} / {{ yesterday_count }} 人 = 基础 {{ base_reward }}
     {% if bonus_desc %} ｜ 连续加成 {{ bonus_desc }}{% endif %}
   </span>
+  {% if honor %}<span class="honor">功勋 +{{ honor }}</span>{% endif %}
 </div>
 {% endif %}
 

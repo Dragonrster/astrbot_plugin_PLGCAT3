@@ -12,7 +12,7 @@
 | 封禁/踢人  | ban、pardon、kick、tempban                                        |
 | 服务器信息 | 在线玩家（Server List Ping）、插件列表、TPS、Spark 健康、实体列表 |
 | MC↔QQ 聊天 | 游戏内 `.mcsay` 转发到 QQ，支持文件模式和 MCSM 面板模式           |
-| 签到经济   | 每日签到领铜钱、查余额、查功勋、玩家间转账、铜钱/补签卡补签        |
+| 签到经济   | 每日签到领铜钱+功勋、查余额、查功勋、玩家间转账、铜钱/补签卡补签   |
 | RCON 透传  | `/mcrun` 执行任意控制台命令（带安全拦截）                         |
 
 ## 安装
@@ -77,6 +77,9 @@
 | `sign_backfill_cost_per_day`        | 补签基础费用                                                          | `50`                          |
 | `sign_backfill_step`                | 补签每往前一天递增的费用（第N天前 = 基础 + (N-1)×步进）               | `100`                         |
 | `sign_streak_bonus`                 | 连续签到加成（连续N天 = N×该值，封顶 2000）                           | `20`                          |
+| `enable_sign_honor`                 | 每日签到额外发放功勋                                                  | `true`                        |
+| `sign_honor_amount`                 | 每次正常签到发放的功勋数量（固定值，不随连续天数累加；补签不发）      | `10`                          |
+| `sign_honor_command`                | 加功勋 RCON 命令模板（`{name}`、`{amount}` 会被替换）                 | `d honor add {name} {amount}` |
 | `sign_card_auto_use`                | 持有补签卡时补签自动免铜（关闭后需显式发送 `卡`）                     | `true`                        |
 | `sign_card_max`                     | 单个玩家可持有的补签卡上限                                            | `99`                          |
 | `silent_sign`                       | 静默：签到（/mcsign）不回复                                           | `false`                       |
@@ -138,7 +141,7 @@
 
 | 命令                                  | 说明                                                             |
 | ------------------------------------- | ---------------------------------------------------------------- |
-| `/mcsign`                             | 每日签到领铜钱（mcqd）                                           |
+| `/mcsign`                             | 每日签到领铜钱 + 功勋（mcqd）                                    |
 | `/mcsigncal`                          | 查看签到日历图片（mcsigncalendar）                               |
 | `/mcsignback [日期] [卡\|铜]`         | 补签：默认花铜，持卡自动免铜（mcbq）                             |
 | `/mccard`                             | 查看自己持有的补签卡（mcsigncard、补签卡、bqk）                  |
@@ -150,6 +153,8 @@
 | `/mcmoney`                            | 查询铜钱余额（mcqian）                                           |
 | `/mchonor [游戏ID\|@某人]`            | 查询功勋（功勋、honor；指定 MC 名查他人需管理员）                |
 | `/mctransfer <游戏ID> <数量>`         | 转账（mczz）                                                     |
+
+**签到功勋**：每次**正常签到**（`/mcsign`）会额外发放固定数量功勋（默认 10，配置 `sign_honor_amount`），实际执行的服务端命令为 `sign_honor_command`（默认 `d honor add <游戏ID> 10`）。功勋为固定值，**不随连续签到天数累加**；**补签不发功勋**（手动 `/mcsignback` 与管理员补签都不发）。可用 `enable_sign_honor` 关闭，或把 `sign_honor_amount` 设为 0。
 
 **功勋查询**：`/mchonor`（或 `/功勋`）会查询你自己已绑定 MC 账号的功勋；管理员可用 `/mchonor <游戏ID>` 或 `/mchonor @某人` 查他人。实际执行的服务端命令为 `<honor_command_prefix> get <游戏ID>`（默认 `dbc honor get <游戏ID>`），并把服务端返回的功勋文本原样展示。
 

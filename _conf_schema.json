@@ -176,6 +176,23 @@
     "type": "int",
     "default": 20
   },
+  "enable_sign_honor": {
+    "description": "每日签到额外发放功勋",
+    "type": "bool",
+    "default": true
+  },
+  "sign_honor_amount": {
+    "description": "每次正常签到发放的功勋数量（固定值，不随连续天数累加）",
+    "type": "int",
+    "default": 10,
+    "hint": "补签不发放功勋；设为 0 效果等同关闭"
+  },
+  "sign_honor_command": {
+    "description": "加功勋 RCON 命令模板",
+    "type": "string",
+    "default": "d honor add {name} {amount}",
+    "hint": "支持 {name} 与 {amount} 占位符，例如: d honor add {name} {amount}"
+  },
   "sign_card_auto_use": {
     "description": "补签时自动使用补签卡（持有补签卡则免铜）",
     "type": "bool",
