@@ -56,6 +56,12 @@
     "default": "code",
     "hint": "none=直接绑定, online=要求在线, code=游戏内验证码"
   },
+  "mc_name_max_length": {
+    "description": "MC 用户名最大长度",
+    "type": "int",
+    "default": 32,
+    "hint": "原版正版账号为 3-16 字符；离线服/代理可能允许更长，按服务器实际情况调整（范围 1-64）"
+  },
   "mc_chat_log_to_qq_enabled": {
     "description": "开启 MC→QQ 聊天转发",
     "type": "bool",

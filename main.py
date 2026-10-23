@@ -445,7 +445,7 @@ async def rcon_command(
 
 
 @register(
-    "PLG_CAT3", "Dragonrster", "MC服务器管理插件：白名单、封禁、聊天转发、签到经济、RCON命令", "1.2.2"
+    "PLG_CAT3", "Dragonrster", "MC服务器管理插件：白名单、封禁、聊天转发、签到经济、RCON命令", "1.2.3"
 )
 class MyPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -460,6 +460,11 @@ class MyPlugin(Star):
         # 申请白名单功能
         self.enable_apply_whitelist = self.config.get("enable_apply_whitelist", False)
         self.whitelist_verify_mode = str(self.config.get("whitelist_verify_mode", "code")).strip().lower()
+        # MC 用户名长度上限：原版正版账号为 3-16 字符，离线服/代理可能允许更长（默认放宽到 32）
+        try:
+            self.mc_name_max_length = max(1, min(64, int(self.config.get("mc_name_max_length", 32))))
+        except (TypeError, ValueError):
+            self.mc_name_max_length = 32
         # 待验证队列 {qqid: {"mcname": str, "code": str, "expire": float}}
         self._wl_pending: dict[str, dict] = {}
         self.plugin_data_dir = StarTools.get_data_dir("astrbot_plugin_PLGCAT3")
@@ -1823,8 +1828,8 @@ class MyPlugin(Star):
                         wm = re.search(r"\.wantwl\s+(\S+)", line)
                         player = m.group(1) if m else None
                         input_code = wm.group(1).upper() if wm else None
-                        # 校验玩家名：防止聊天注入攻击
-                        if player and not re.match(r'^[A-Za-z0-9_]{1,16}$', player):
+                        # 校验玩家名：防止聊天注入攻击（长度上限可配置）
+                        if player and not self._valid_mc_name(player):
                             player = None
                         pending_count = len(self._wl_pending)
                         logger.info(f"[MCSM] .wantwl行: player={player} code={input_code} pending={pending_count}")
@@ -1902,6 +1907,13 @@ class MyPlugin(Star):
 
     def is_admin(self, qqid: str) -> bool:
         return qqid in self.admin_qqs
+
+    def _valid_mc_name(self, name: str) -> bool:
+        """校验 MC 用户名：只允许字母、数字、下划线，长度不超过 mc_name_max_length（防注入）。"""
+        if not name:
+            return False
+        pattern = rf"[A-Za-z0-9_]{{1,{self.mc_name_max_length}}}"
+        return re.fullmatch(pattern, str(name).strip()) is not None
 
     def _event_message_str(self, event: AstrMessageEvent) -> str:
         raw = getattr(event, "message_str", None)
@@ -2234,12 +2246,15 @@ class MyPlugin(Star):
         if not self.enable_apply_whitelist:
             yield event.plain_result("抱歉，白名单申请功能未开启。")
             return
+        mcname = str(mcname).strip()
         if not mcname:
             yield event.plain_result("请输入要绑定的MC用户名，例如：/wantwl Steve")
             return
-        # 校验 MC 用户名：只允许 A-Za-z0-9_，最多16字符，防止注入
-        if not re.match(r'^[A-Za-z0-9_]{1,16}$', mcname):
-            yield event.plain_result("无效的 MC 用户名，只允许字母、数字、下划线，最多16个字符。")
+        # 校验 MC 用户名：只允许 A-Za-z0-9_，长度上限可配置（原版正版 16，离线服可放宽），防止注入
+        if not self._valid_mc_name(mcname):
+            yield event.plain_result(
+                f"无效的 MC 用户名，只允许字母、数字、下划线，最多{self.mc_name_max_length}个字符。"
+            )
             return
 
         qqid = str(event.get_sender_id())
